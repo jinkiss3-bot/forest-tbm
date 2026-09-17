@@ -1,0 +1,299 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover, maximum-scale=1.2">
+<title>오늘의 TBM 확인 · 벌목현장 안전관리</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Noto+Sans+KR:wght@400;500;700;900&display=swap" rel="stylesheet">
+<style>
+  :root{
+    --forest:#1F3D2B;
+    --forest-deep:#142A1D;
+    --sage-tint:#E7EDE3;
+    --paper:#F7F5F0;
+    --card:#FFFFFF;
+    --ink:#20241F;
+    --ink-soft:#556151;
+    --line:#DDE3D6;
+    --orange:#E8622C;
+    --orange-deep:#C24E1E;
+    --green-ok:#2E7D4F;
+    --green-tint:#E7F3EB;
+  }
+  *{box-sizing:border-box;-webkit-tap-highlight-color:transparent;}
+  html,body{margin:0;padding:0;}
+  body{
+    font-family:'Noto Sans KR',-apple-system,sans-serif;
+    background:var(--paper);
+    color:var(--ink);
+    min-height:100vh;
+    font-size:19px;
+    line-height:1.6;
+    padding-bottom:calc(24px + env(safe-area-inset-bottom,0px));
+  }
+  #app{max-width:520px;margin:0 auto;padding:0 20px;}
+
+  header{
+    padding:calc(24px + env(safe-area-inset-top,0px)) 0 18px;
+    text-align:center;
+  }
+  header .badge{
+    display:inline-block;background:var(--forest);color:#fff;font-weight:800;
+    font-size:14px;padding:7px 16px;border-radius:99px;margin-bottom:10px;
+  }
+  header h1{font-size:26px;font-weight:900;margin:0;color:var(--forest-deep);}
+  header .date{font-size:16px;color:var(--ink-soft);margin-top:4px;font-weight:600;}
+
+  .card{
+    background:var(--card);
+    border:1.5px solid var(--line);
+    border-radius:18px;
+    padding:22px;
+    margin-bottom:16px;
+  }
+  .card h2{font-size:19px;font-weight:800;margin:0 0 12px;color:var(--forest-deep);}
+
+  .summary-text{
+    font-size:18px;line-height:1.8;white-space:pre-wrap;color:var(--ink);
+  }
+  .summary-empty{color:var(--ink-soft);font-size:16px;}
+
+  .rule{
+    display:flex;align-items:flex-start;gap:14px;
+    padding:16px 0;border-bottom:1.5px solid var(--line);cursor:pointer;
+  }
+  .rule:last-child{border-bottom:none;}
+  .rule .box{
+    flex:none;width:34px;height:34px;border-radius:9px;border:2.5px solid var(--line);
+    display:flex;align-items:center;justify-content:center;font-size:20px;font-weight:900;
+    color:transparent;margin-top:2px;
+  }
+  .rule.checked .box{background:var(--green-ok);border-color:var(--green-ok);color:#fff;}
+  .rule .txt{font-size:18px;font-weight:600;line-height:1.5;}
+  .rule.checked .txt{color:var(--forest-deep);}
+
+  label{display:block;font-size:16px;font-weight:700;color:var(--ink-soft);margin-bottom:10px;}
+  input[type=text]{
+    width:100%;border:2px solid var(--line);border-radius:12px;padding:16px;
+    font-size:20px;font-family:inherit;color:var(--ink);background:#fff;outline:none;
+  }
+  input[type=text]:focus{border-color:var(--forest);}
+
+  .name-suggestions{display:flex;flex-wrap:wrap;gap:8px;margin-bottom:12px;}
+  .name-chip{
+    background:var(--sage-tint);border:none;border-radius:99px;padding:10px 16px;
+    font-size:16px;font-weight:700;color:var(--forest-deep);cursor:pointer;
+  }
+  .name-chip.active{background:var(--forest);color:#fff;}
+
+  .submit-btn{
+    width:100%;border:none;border-radius:16px;padding:20px;
+    font-size:21px;font-weight:900;color:#fff;background:var(--orange);
+    cursor:pointer;
+  }
+  .submit-btn[disabled]{background:var(--line);color:var(--ink-soft);}
+  .submit-btn:not([disabled]):active{background:var(--orange-deep);}
+
+  .center-screen{
+    min-height:100vh;display:flex;flex-direction:column;align-items:center;justify-content:center;
+    text-align:center;padding:32px;
+  }
+  .center-screen .icon{font-size:64px;margin-bottom:16px;}
+  .center-screen h1{font-size:24px;font-weight:900;margin:0 0 10px;color:var(--forest-deep);}
+  .center-screen p{font-size:17px;color:var(--ink-soft);line-height:1.6;}
+
+  [hidden]{display:none !important;}
+</style>
+</head>
+<body>
+<div id="app">
+
+  <div id="loadingScreen" class="center-screen">
+    <div class="icon">⏳</div>
+    <h1>불러오는 중...</h1>
+  </div>
+
+  <div id="errorScreen" class="center-screen" hidden>
+    <div class="icon">😕</div>
+    <h1>링크를 찾을 수 없어요</h1>
+    <p>관리자에게 오늘의 새 링크를 다시 받아주세요.</p>
+  </div>
+
+  <div id="mainScreen" hidden>
+    <header>
+      <div class="badge">오늘의 TBM 확인</div>
+      <h1>작업 전 안전회의</h1>
+      <div class="date" id="dateLabel">-</div>
+    </header>
+
+    <div class="card">
+      <h2>📋 오늘의 교육내용</h2>
+      <div class="summary-text" id="summaryText"><span class="summary-empty">관리자가 곧 내용을 올릴 예정이에요. 잠시만 기다려주세요.</span></div>
+    </div>
+
+    <div class="card">
+      <h2>✅ 안전수칙 확인</h2>
+      <div id="rulesList"></div>
+    </div>
+
+    <div class="card">
+      <h2>✍️ 이름 확인</h2>
+      <label>본인 이름을 눌러 선택하거나 새로 입력해주세요</label>
+      <div class="name-suggestions" id="nameSuggestions"></div>
+      <input type="text" id="nameInput" placeholder="이름 입력">
+    </div>
+
+    <button class="submit-btn" id="submitBtn" disabled>확인 완료</button>
+  </div>
+
+  <div id="doneScreen" class="center-screen" hidden>
+    <div class="icon">🙏</div>
+    <h1>확인 완료됐습니다</h1>
+    <p id="doneName">감사합니다. 오늘도 안전한 작업 되세요.</p>
+  </div>
+
+</div>
+
+<script type="module">
+import { initializeApp } from "https://www.gstatic.com/firebasejs/10.13.2/firebase-app.js";
+import {
+  getFirestore, doc, getDoc, onSnapshot, collection, addDoc,
+  serverTimestamp, setDoc, getDocs
+} from "https://www.gstatic.com/firebasejs/10.13.2/firebase-firestore.js";
+
+const firebaseConfig = {
+  apiKey: "AIzaSyDDB1aMKYLHwFkiEVhXu-sl0Ht6o_6Rugc",
+  authDomain: "forest-tbm.firebaseapp.com",
+  projectId: "forest-tbm",
+  storageBucket: "forest-tbm.firebasestorage.app",
+  messagingSenderId: "893926867733",
+  appId: "1:893926867733:web:5f85a0cbf1a6b93feadf1c"
+};
+const app = initializeApp(firebaseConfig);
+const db = getFirestore(app);
+
+const RULES = [
+  "수구(밑등 자르는 각도)는 나무 지름의 1/4 이상, 30도 이상으로 만들겠습니다",
+  "벌목 위험구역(나무 높이의 2배 이내)에는 다른 사람을 접근시키지 않겠습니다",
+  "다른 나무에 걸리거나 받쳐진 나무는 함부로 벌목하지 않겠습니다",
+  "작업 전 대피로와 대피장소를 미리 확인해두겠습니다",
+  "안전모, 안전화 등 보호구를 반드시 착용하겠습니다",
+];
+
+const $ = (id) => document.getElementById(id);
+const params = new URLSearchParams(location.search);
+const sessionId = params.get("session");
+
+const checked = new Array(RULES.length).fill(false);
+let selectedName = "";
+
+function show(id){
+  ["loadingScreen","errorScreen","mainScreen","doneScreen"].forEach(x => $(x).hidden = (x !== id));
+}
+
+async function main(){
+  if (!sessionId) { show("errorScreen"); return; }
+
+  const sessionRef = doc(db, "sessions", sessionId);
+  const snap = await getDoc(sessionRef);
+  if (!snap.exists()) { show("errorScreen"); return; }
+
+  show("mainScreen");
+  const data = snap.data();
+  $("dateLabel").textContent = new Date(data.date).toLocaleDateString("ko-KR", {year:"numeric",month:"long",day:"numeric",weekday:"long"});
+
+  onSnapshot(sessionRef, (s) => {
+    const d = s.data();
+    if (!d) return;
+    $("summaryText").innerHTML = d.summary
+      ? escapeHtml(d.summary)
+      : '<span class="summary-empty">관리자가 곧 내용을 올릴 예정이에요. 잠시만 기다려주세요.</span>';
+  });
+
+  renderRules();
+  await loadNameSuggestions();
+  setupNameInput();
+  $("submitBtn").onclick = submit;
+}
+
+function renderRules(){
+  const wrap = $("rulesList");
+  wrap.innerHTML = RULES.map((r, i) => `
+    <div class="rule" data-i="${i}">
+      <div class="box">✓</div>
+      <div class="txt">${escapeHtml(r)}</div>
+    </div>
+  `).join("");
+  wrap.querySelectorAll(".rule").forEach(el => {
+    el.onclick = () => {
+      const i = parseInt(el.dataset.i, 10);
+      checked[i] = !checked[i];
+      el.classList.toggle("checked", checked[i]);
+      updateSubmitState();
+    };
+  });
+}
+
+async function loadNameSuggestions(){
+  try {
+    const snap = await getDocs(collection(db, "workerNames"));
+    const names = snap.docs.map(d => d.id).sort((a,b)=>a.localeCompare(b,"ko"));
+    const wrap = $("nameSuggestions");
+    wrap.innerHTML = names.map(n => `<button type="button" class="name-chip" data-name="${escapeHtml(n)}">${escapeHtml(n)}</button>`).join("");
+    wrap.querySelectorAll(".name-chip").forEach(btn => {
+      btn.onclick = () => {
+        wrap.querySelectorAll(".name-chip").forEach(b => b.classList.remove("active"));
+        btn.classList.add("active");
+        selectedName = btn.dataset.name;
+        $("nameInput").value = selectedName;
+        updateSubmitState();
+      };
+    });
+  } catch(e){ console.error(e); }
+}
+
+function setupNameInput(){
+  $("nameInput").addEventListener("input", () => {
+    selectedName = $("nameInput").value.trim();
+    document.querySelectorAll(".name-chip").forEach(b => b.classList.toggle("active", b.dataset.name === selectedName));
+    updateSubmitState();
+  });
+}
+
+function updateSubmitState(){
+  const allChecked = checked.every(Boolean);
+  const hasName = selectedName.trim().length > 0;
+  $("submitBtn").disabled = !(allChecked && hasName);
+}
+
+async function submit(){
+  if ($("submitBtn").disabled) return;
+  $("submitBtn").disabled = true;
+  $("submitBtn").textContent = "저장 중...";
+  try {
+    await addDoc(collection(db, "sessions", sessionId, "completions"), {
+      name: selectedName.trim(),
+      checkedItems: checked,
+      completedAt: serverTimestamp(),
+    });
+    await setDoc(doc(db, "workerNames", selectedName.trim()), { updatedAt: serverTimestamp() }, { merge: true });
+    $("doneName").textContent = `${selectedName.trim()}님, 확인 감사합니다. 오늘도 안전한 작업 되세요.`;
+    show("doneScreen");
+  } catch(e){
+    console.error(e);
+    $("submitBtn").disabled = false;
+    $("submitBtn").textContent = "확인 완료";
+    alert("저장 중 문제가 생겼어요. 다시 시도해주세요.");
+  }
+}
+
+function escapeHtml(s){
+  return String(s||"").replace(/[&<>"']/g, m => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[m]));
+}
+
+main();
+</script>
+</body>
+</html>
