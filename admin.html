@@ -438,11 +438,38 @@ function setupMic(){
   let autoStopTimeout = null;
   let seconds = 0;
 
+  // 모바일 브라우저는 음성인식이 일정 시간마다 자동으로 끊겼다가 재시작되는데,
+  // 재시작된 세션이 "이미 인식한 부분 + 새로 들은 부분"을 통째로 다시 인식해서
+  // "오늘" -> "오늘 tvN" -> "오늘 tvN 일주일" 처럼 점점 길어지며 겹치는 경우가 있어요.
+  // mergeOverlap은 새 문장의 앞부분이 지금까지 쌓인 문장의 뒷부분과 겹치는 만큼을
+  // 찾아서, 진짜로 새로 추가된 단어만 이어붙여요.
+  function mergeOverlap(existingText, incomingChunk){
+    const existingWords = existingText.trim().split(/\s+/).filter(Boolean);
+    const incomingWords = incomingChunk.trim().split(/\s+/).filter(Boolean);
+    if (existingWords.length === 0) return incomingWords.join(" ");
+    const maxK = Math.min(existingWords.length, incomingWords.length);
+    let bestK = 0;
+    for (let k = maxK; k >= 1; k--) {
+      const tailSlice = existingWords.slice(existingWords.length - k).join(" ");
+      const headSlice = incomingWords.slice(0, k).join(" ");
+      if (tailSlice === headSlice) { bestK = k; break; }
+    }
+    return incomingWords.slice(bestK).join(" ");
+  }
+
+  function appendFinalChunk(raw){
+    const chunk = raw.trim();
+    if (!chunk) return;
+    const remainder = mergeOverlap(finalTranscript, chunk);
+    if (!remainder) return; // 겹치는 내용뿐이라 새로 추가할 게 없음
+    finalTranscript += remainder + " ";
+  }
+
   recognition.onresult = (e) => {
     let interim = "";
     for (let i = e.resultIndex; i < e.results.length; i++) {
       const t = e.results[i][0].transcript;
-      if (e.results[i].isFinal) finalTranscript += t + " ";
+      if (e.results[i].isFinal) appendFinalChunk(t);
       else interim += t;
     }
     $("micHint").textContent = (finalTranscript + interim).slice(-60) || "듣고 있어요...";
@@ -452,8 +479,12 @@ function setupMic(){
   };
   recognition.onend = () => {
     if (recording) {
-      // 브라우저가 자동으로 끊는 경우 재시작 (5분 제한 내에서)
-      try { recognition.start(); } catch(e){}
+      // 브라우저가 자동으로 끊는 경우 재시작 (5분 제한 내에서).
+      // 끝나자마자 바로 재시작하면 마이크 권한을 계속 다시 물어보는
+      // 기기가 있어서, 아주 짧게 텀을 주고 재시작해요.
+      setTimeout(() => {
+        if (recording) { try { recognition.start(); } catch(e){} }
+      }, 300);
     }
   };
 
@@ -490,10 +521,46 @@ function setupMic(){
   }
 }
 
+// 음성인식 재시작 과정에서 새어 들어온 반복 구간을 한 번 더 정리하는 안전장치예요.
+// 예: "저 저 오늘 저 오늘 TV 저 오늘 TV 보면" -> "저 오늘 TV 보면"
+function removeRepeatedPhrases(text){
+  let words = (text || "").split(/\s+/).filter(Boolean);
+  // 1) 바로 옆에 똑같은 단어가 연속되면 하나로 줄임 (예: "저 저" -> "저")
+  words = words.filter((w, i) => i === 0 || w !== words[i - 1]);
+  // 2) 2~5단어짜리 구절이 바로 뒤에 그대로 반복되면 한 번만 남김
+  for (let len = 5; len >= 2; len--) {
+    let changed = true;
+    while (changed) {
+      changed = false;
+      for (let i = 0; i + len * 2 <= words.length; i++) {
+        const a = words.slice(i, i + len).join(" ");
+        const b = words.slice(i + len, i + len * 2).join(" ");
+        if (a === b) {
+          words.splice(i + len, len);
+          changed = true;
+          break;
+        }
+      }
+    }
+  }
+  return words.join(" ");
+}
+
+// 문장 중간에 홀로 끼어드는 추임새(어, 저, 음, 그, 뭐 등)는 단어 단위로 통째로 제거해요.
+// "저는", "그것" 처럼 다른 말에 붙어있는 경우는 다른 단어로 취급되니 건드리지 않아요.
+const FILLER_WORDS = ["어","어어","어어어","음","음음","그","그그","저","저저","뭐","뭐뭐","막","음..","어..","그..","자","응","네","아"];
+function stripFillerWords(text){
+  const words = (text || "").split(/\s+/).filter(Boolean);
+  const kept = words.filter(w => !FILLER_WORDS.includes(w));
+  return kept.join(" ");
+}
+
 function cleanUpTranscript(raw){
   let t = raw || "";
+  t = removeRepeatedPhrases(t);
   const fillers = ["음~","음...","음,","어~","어...","그~","저기요","저기","인제","이제요","자,","그 뭐냐","뭐랄까","그니까","그러니까요"];
   fillers.forEach(f => { t = t.split(f).join(""); });
+  t = stripFillerWords(t);
   t = t.replace(/\s{2,}/g, " ").trim();
   // 문장 부호 없는 긴 구간에 마침표 삽입 (대략 12어절 단위)
   const words = t.split(" ");
