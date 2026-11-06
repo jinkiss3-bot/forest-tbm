@@ -159,10 +159,27 @@
   }
   .toast.show{opacity:1;}
 
+  .mic-btn[disabled]{opacity:0.5;}
+  .session-label{font-size:16px;font-weight:800;color:var(--forest-deep);margin:14px 0;}
+  .history-row{
+    display:block;width:100%;text-align:left;background:#fff;border:none;border-bottom:1px solid var(--line);
+    padding:12px 0;font-family:inherit;cursor:pointer;color:var(--ink);
+  }
+  .history-row:last-child{border-bottom:none;}
+  .history-title{font-size:14.5px;font-weight:700;}
+  .history-snippet{font-size:12.5px;color:var(--ink-soft);margin-top:3px;}
+  details.card summary{font-size:16px;font-weight:700;color:var(--forest-deep);cursor:pointer;}
+  details.card .desc{margin-top:10px;}
+
+  /* 일지는 인쇄할 때만 나타나요 */
+  #printSheet{display:none;}
   @media print{
-    header,.no-print{display:none !important;}
-    body{background:#fff;}
-    .card{border:none;box-shadow:none;padding:0;margin-bottom:20px;}
+    header,.no-print,.toast,#gate{display:none !important;}
+    html,body,#app{background:#fff;}
+    main{padding:0;}
+    #main .card:not(#printSheet){display:none !important;}
+    #printSheet{display:block !important;border:none;padding:0;margin:0;}
+    #p_photos .photo-thumb{break-inside:avoid;}
   }
 </style>
 </head>
@@ -187,16 +204,35 @@
 
     <main>
 
-      <div class="card" id="startCard">
-        <h2>오늘의 TBM 시작</h2>
-        <p class="desc">새 TBM 일지를 시작하면 근로자용 확인 링크가 함께 만들어져요.</p>
-        <button class="btn btn-primary" id="startBtn">오늘 TBM 시작하기</button>
+      <div id="homeArea" style="display:none;">
+        <div class="card" id="startCard">
+          <h2>오늘의 TBM 시작</h2>
+          <p class="desc">TBM을 할 때마다 새 일지와 근로자용 확인 링크가 만들어져요.</p>
+          <button class="btn btn-primary" id="startBtn">오늘 TBM 시작하기</button>
+        </div>
+
+        <div class="card">
+          <h2>지난 일지</h2>
+          <p class="desc">최근 30건을 볼 수 있어요. 누르면 내용 확인과 인쇄를 할 수 있어요.</p>
+          <div id="historyList"><div class="empty-note">불러오는 중...</div></div>
+        </div>
+
+        <details class="card">
+          <summary>근로자 이름 목록 관리</summary>
+          <p class="desc">근로자 화면에 버튼으로 뜨는 이름이에요. 잘못 입력된 이름을 지울 수 있어요.</p>
+          <div id="nameList"><div class="empty-note">불러오는 중...</div></div>
+        </details>
       </div>
 
       <div id="sessionArea" style="display:none;">
 
+        <div class="no-print">
+          <button class="btn btn-outline" id="backBtn">← 처음 화면 (새 TBM · 지난 일지)</button>
+          <div class="session-label" id="sessionLabel">-</div>
+        </div>
+
         <div class="card">
-          <h2>오늘 작업 인원</h2>
+          <h2>작업 인원</h2>
           <p class="desc">현장에 나온 인원수를 입력하면 근로자 확인 현황이 정확해져요.</p>
           <label for="headcount">오늘 인원수</label>
           <input type="number" id="headcount" min="1" placeholder="예: 8" inputmode="numeric">
@@ -226,7 +262,7 @@
           <input type="file" id="photoInput" accept="image/*" capture="environment" multiple style="display:none;">
         </div>
 
-        <div class="card">
+        <div class="card" id="linkCard">
           <h2>근로자 확인 링크</h2>
           <p class="desc">아래 링크를 복사해서 현장 단체 카톡방에 붙여넣어 주세요.</p>
           <div class="link-box">
@@ -253,7 +289,7 @@
           </div>
         </div>
 
-        <div class="card" id="printSheet" style="display:none;">
+        <div class="card" id="printSheet">
           <h2 style="font-size:20px;">TBM(작업전안전회의) 실시일지</h2>
           <p><b>일자:</b> <span id="p_date"></span> &nbsp; <b>실시자:</b> 관리자 &nbsp; <b>인원:</b> <span id="p_headcount"></span>명</p>
           <p><b>교육내용</b></p>
@@ -275,7 +311,7 @@
 import { initializeApp } from "https://www.gstatic.com/firebasejs/10.13.2/firebase-app.js";
 import {
   getFirestore, doc, setDoc, updateDoc, onSnapshot, collection,
-  addDoc, serverTimestamp, query, orderBy, deleteDoc
+  addDoc, serverTimestamp, query, orderBy, deleteDoc, getDocs, limit
 } from "https://www.gstatic.com/firebasejs/10.13.2/firebase-firestore.js";
 
 const firebaseConfig = {
@@ -312,110 +348,268 @@ $("gateBtn").onclick = () => {
 };
 
 let sessionId = null;
-let unsubCompletions = null;
-let photos = []; // {id, dataUrl}
+let sessionData = null;
+let sessionUnsubs = [];
+let photos = [];  // {id, dataUrl}
+let workers = []; // {name, completedAt} 이름 중복 제거 후
+let headcountNow = 0;
+let summaryDirty = false; // 저장되지 않은 교육내용 수정이 있는지
+let micBusy = false;      // 녹음 중이거나 녹음 내용을 정리하는 중인지
 
 function todayStr(){
   const d = new Date();
   return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,"0")}-${String(d.getDate()).padStart(2,"0")}`;
 }
 
-function init(){
-  $("todayLabel").textContent = new Date().toLocaleDateString("ko-KR", {year:"numeric",month:"long",day:"numeric",weekday:"long"});
+function formatDate(dateStr){
+  const d = dateStr ? new Date(dateStr + "T00:00:00") : new Date();
+  return d.toLocaleDateString("ko-KR", {year:"numeric",month:"long",day:"numeric",weekday:"long"});
+}
 
-  // 오늘 이미 시작한 세션이 있으면 이어서
-  const saved = localStorage.getItem("tbm_session_" + todayStr());
-  if (saved) {
-    sessionId = saved;
-    $("startCard").style.display = "none";
-    $("sessionArea").style.display = "block";
-    attachSession();
-  }
+function init(){
+  $("todayLabel").textContent = formatDate(todayStr());
 
   $("startBtn").onclick = startSession;
-  $("saveSummaryBtn").onclick = saveSummary;
+  $("backBtn").onclick = goHome;
+  $("saveSummaryBtn").onclick = () => saveSummary();
+  $("summaryText").oninput = () => { summaryDirty = true; };
+  $("summaryText").onchange = () => { if (summaryDirty) saveSummary({ silent: true }); };
+  $("headcount").onchange = saveHeadcount;
   $("photoAddBtn").onclick = () => $("photoInput").click();
   $("photoInput").onchange = handlePhotoSelect;
   $("copyLinkBtn").onclick = copyLink;
   $("printBtn").onclick = printLog;
   $("emailBtn").onclick = emailLog;
+  window.addEventListener("beforeprint", buildPrintSheet);
   setupMic();
+
+  // 오늘 이미 시작한 세션이 있으면 이어서
+  const saved = localStorage.getItem("tbm_session_" + todayStr());
+  if (saved) openSession(saved);
+  else showHome();
 }
 
+// ---------- 첫 화면 (시작 · 지난 일지 · 이름 목록) ----------
+function showHome(){
+  detachSession();
+  sessionId = null;
+  $("sessionArea").style.display = "none";
+  $("homeArea").style.display = "block";
+  loadHistory();
+  loadNames();
+}
+
+async function goHome(){
+  if (micBusy) { toast("녹음을 먼저 끝내주세요"); return; }
+  if (summaryDirty) await saveSummary({ silent: true });
+  showHome();
+  window.scrollTo(0, 0);
+}
+
+async function loadHistory(){
+  const wrap = $("historyList");
+  try {
+    const snap = await getDocs(query(collection(db, "sessions"), orderBy("createdAt", "desc"), limit(30)));
+    wrap.innerHTML = "";
+    if (snap.empty) {
+      wrap.innerHTML = '<div class="empty-note">아직 저장된 일지가 없어요</div>';
+      return;
+    }
+    snap.docs.forEach((d) => {
+      const data = d.data();
+      const row = document.createElement("button");
+      row.type = "button";
+      row.className = "history-row";
+      const title = document.createElement("div");
+      title.className = "history-title";
+      title.textContent = `${data.date === todayStr() ? "오늘 · " : ""}${formatDate(data.date)} · ${data.headcount || 0}명`;
+      const snippet = document.createElement("div");
+      snippet.className = "history-snippet";
+      snippet.textContent = (data.summary || "(교육내용 없음)").slice(0, 40);
+      row.append(title, snippet);
+      row.onclick = () => openSession(d.id);
+      wrap.appendChild(row);
+    });
+  } catch (err) {
+    console.error(err);
+    wrap.innerHTML = '<div class="empty-note">일지 목록을 불러오지 못했어요. 인터넷 연결을 확인해주세요.</div>';
+  }
+}
+
+async function loadNames(){
+  const wrap = $("nameList");
+  try {
+    const snap = await getDocs(collection(db, "workerNames"));
+    const names = snap.docs.map(d => d.id).sort((a,b) => a.localeCompare(b, "ko"));
+    wrap.innerHTML = "";
+    if (names.length === 0) {
+      wrap.innerHTML = '<div class="empty-note">저장된 이름이 없어요</div>';
+      return;
+    }
+    names.forEach((name) => {
+      const row = document.createElement("div");
+      row.className = "worker-row";
+      const label = document.createElement("span");
+      label.textContent = name;
+      const del = document.createElement("button");
+      del.type = "button";
+      del.className = "copy-btn";
+      del.textContent = "삭제";
+      del.onclick = async () => {
+        if (!confirm(`"${name}" 이름을 버튼 목록에서 지울까요? 이미 저장된 일지 기록은 그대로 남아요.`)) return;
+        try {
+          await deleteDoc(doc(db, "workerNames", name));
+          row.remove();
+          toast("이름을 지웠어요");
+        } catch (err) {
+          console.error(err);
+          toast("이름을 지우지 못했어요");
+        }
+      };
+      row.append(label, del);
+      wrap.appendChild(row);
+    });
+  } catch (err) {
+    console.error(err);
+    wrap.innerHTML = '<div class="empty-note">이름 목록을 불러오지 못했어요.</div>';
+  }
+}
+
+// ---------- 세션 ----------
 async function startSession(){
-  const id = todayStr() + "-" + Math.random().toString(36).slice(2,7);
-  await setDoc(doc(db, "sessions", id), {
-    date: todayStr(),
-    createdAt: serverTimestamp(),
-    headcount: 0,
-    summary: "",
-    rawTranscript: "",
-  });
-  localStorage.setItem("tbm_session_" + todayStr(), id);
+  const storageKey = "tbm_session_" + todayStr();
+  if (localStorage.getItem(storageKey) && !confirm("오늘 이미 시작한 TBM이 있어요. 새 TBM을 하나 더 시작할까요? 새 링크가 만들어져요.")) return;
+  if (!navigator.onLine) { toast("인터넷 연결을 확인해주세요"); return; }
+
+  const btn = $("startBtn");
+  btn.disabled = true;
+  try {
+    const id = todayStr() + "-" + Math.random().toString(36).slice(2,7);
+    await setDoc(doc(db, "sessions", id), {
+      date: todayStr(),
+      createdAt: serverTimestamp(),
+      headcount: 0,
+      summary: "",
+      rawTranscript: "",
+    });
+    localStorage.setItem(storageKey, id);
+    openSession(id);
+    toast("오늘의 TBM이 시작됐어요");
+  } catch (err) {
+    console.error(err);
+    toast("TBM을 시작하지 못했어요. 다시 시도해주세요.");
+  } finally {
+    btn.disabled = false;
+  }
+}
+
+function detachSession(){
+  sessionUnsubs.forEach(unsub => unsub());
+  sessionUnsubs = [];
+}
+
+function openSession(id){
+  detachSession();
   sessionId = id;
-  $("startCard").style.display = "none";
+  sessionData = null;
+  photos = [];
+  workers = [];
+  headcountNow = 0;
+  summaryDirty = false;
+  $("headcount").value = "";
+  $("summaryText").value = "";
+  $("micTimer").textContent = "00:00";
+  $("micHint").textContent = "버튼을 누르면 녹음이 시작돼요";
+  renderPhotos();
+  renderWorkers([]);
+  $("homeArea").style.display = "none";
   $("sessionArea").style.display = "block";
+  window.scrollTo(0, 0);
   attachSession();
-  toast("오늘의 TBM이 시작됐어요");
 }
 
 function attachSession(){
   const link = location.origin + location.pathname.replace(/admin\.html$/, "worker.html") + "?session=" + sessionId;
   $("workerLink").textContent = link;
 
-  onSnapshot(doc(db, "sessions", sessionId), (snap) => {
+  sessionUnsubs.push(onSnapshot(doc(db, "sessions", sessionId), (snap) => {
     const d = snap.data();
     if (!d) return;
+    sessionData = d;
+    const isPast = d.date !== todayStr();
+    $("sessionLabel").textContent = `${formatDate(d.date)} TBM${isPast ? " (지난 일지)" : ""}`;
+    $("linkCard").style.display = isPast ? "none" : "block";
     if (document.activeElement !== $("headcount")) $("headcount").value = d.headcount || "";
-    if (document.activeElement !== $("summaryText")) $("summaryText").value = d.summary || "";
+    // 아직 저장하지 않은 수정 내용은 서버 값으로 덮어쓰지 않아요.
+    if (!summaryDirty && document.activeElement !== $("summaryText")) $("summaryText").value = d.summary || "";
     updateProgressUI(d.headcount || 0);
-  });
-
-  $("headcount").onchange = async () => {
-    const n = parseInt($("headcount").value || "0", 10);
-    await updateDoc(doc(db, "sessions", sessionId), { headcount: n });
-  };
+  }));
 
   // photos
-  onSnapshot(query(collection(db, "sessions", sessionId, "photos"), orderBy("uploadedAt")), (snap) => {
+  sessionUnsubs.push(onSnapshot(query(collection(db, "sessions", sessionId, "photos"), orderBy("uploadedAt")), (snap) => {
     photos = snap.docs.map(d => ({ id: d.id, ...d.data() }));
     renderPhotos();
-  });
+  }));
 
   // completions realtime
-  if (unsubCompletions) unsubCompletions();
-  unsubCompletions = onSnapshot(query(collection(db, "sessions", sessionId, "completions"), orderBy("completedAt")), (snap) => {
-    const list = snap.docs.map(d => d.data());
-    renderWorkers(list);
-  });
+  sessionUnsubs.push(onSnapshot(query(collection(db, "sessions", sessionId, "completions"), orderBy("completedAt")), (snap) => {
+    renderWorkers(snap.docs.map(d => d.data()));
+  }));
+}
+
+async function saveHeadcount(){
+  const n = parseInt($("headcount").value || "0", 10);
+  try {
+    await updateDoc(doc(db, "sessions", sessionId), { headcount: n });
+  } catch (err) {
+    console.error(err);
+    toast("인원수를 저장하지 못했어요");
+  }
 }
 
 function updateProgressUI(headcount){
-  window._headcount = headcount;
-  const done = window._doneCount || 0;
+  headcountNow = headcount;
+  const done = workers.length;
   $("progressNum").innerHTML = `${done} <small>/ ${headcount || 0}명</small>`;
   const pct = headcount > 0 ? Math.min(100, (done / headcount) * 100) : 0;
   $("progressFill").style.width = pct + "%";
 }
 
+function workerTime(w){
+  const t = w.completedAt?.toDate ? w.completedAt.toDate() : new Date();
+  return t.toLocaleTimeString("ko-KR", {hour:"2-digit", minute:"2-digit"});
+}
+
 function renderWorkers(list){
-  window._doneCount = list.length;
-  updateProgressUI(window._headcount || 0);
+  // 예전 일지에 같은 이름이 여러 번 저장돼 있어도 한 명으로 셉니다.
+  const seen = new Set();
+  workers = list.filter((w) => {
+    const key = String(w.name || "").replace(/\s+/g, "");
+    if (seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
+  updateProgressUI(headcountNow);
   const wrap = $("workerList");
-  if (list.length === 0) {
+  if (workers.length === 0) {
     wrap.innerHTML = '<div class="empty-note">아직 확인한 근로자가 없어요</div>';
     return;
   }
-  wrap.innerHTML = list.map(w => {
-    const t = w.completedAt?.toDate ? w.completedAt.toDate() : new Date();
-    const time = t.toLocaleTimeString("ko-KR", {hour:"2-digit", minute:"2-digit"});
-    return `<div class="worker-row"><span>✅ ${escapeHtml(w.name)}</span><span class="worker-time">${time} 완료</span></div>`;
-  }).join("");
+  wrap.innerHTML = workers.map(w =>
+    `<div class="worker-row"><span>✅ ${escapeHtml(w.name)}</span><span class="worker-time">${workerTime(w)} 완료</span></div>`
+  ).join("");
 }
 
-async function saveSummary(){
-  await updateDoc(doc(db, "sessions", sessionId), { summary: $("summaryText").value });
-  toast("교육내용이 저장됐어요");
+async function saveSummary({ silent = false, extra = {} } = {}){
+  const text = $("summaryText").value;
+  try {
+    await updateDoc(doc(db, "sessions", sessionId), { summary: text, ...extra });
+    if ($("summaryText").value === text) summaryDirty = false;
+    if (!silent) toast("교육내용이 저장됐어요");
+  } catch (err) {
+    console.error(err);
+    toast("교육내용을 저장하지 못했어요. 인터넷 연결을 확인해주세요.");
+  }
 }
 
 // ---------- voice recording ----------
@@ -433,9 +627,12 @@ function setupMic(){
   recognition.interimResults = true;
 
   let recording = false;
+  let stopping = false;
   let finalTranscript = "";
+  let lastInterim = "";
+  let micError = "";
   let timerInterval = null;
-  let autoStopTimeout = null;
+  let finishTimer = null;
   let seconds = 0;
 
   // 모바일 브라우저는 음성인식이 일정 시간마다 자동으로 끊겼다가 재시작되는데,
@@ -465,34 +662,60 @@ function setupMic(){
     finalTranscript += remainder + " ";
   }
 
+  // 인식이 끊길 때 아직 확정되지 않은 말이 사라지지 않게 이어붙여요.
+  function flushInterim(){
+    if (lastInterim.trim()) appendFinalChunk(lastInterim);
+    lastInterim = "";
+  }
+
   recognition.onresult = (e) => {
+    if (!recording && !stopping) return;
     let interim = "";
     for (let i = e.resultIndex; i < e.results.length; i++) {
       const t = e.results[i][0].transcript;
       if (e.results[i].isFinal) appendFinalChunk(t);
       else interim += t;
     }
-    $("micHint").textContent = (finalTranscript + interim).slice(-60) || "듣고 있어요...";
+    lastInterim = interim;
+    if (recording) $("micHint").textContent = (finalTranscript + interim).slice(-60) || "듣고 있어요...";
   };
-  recognition.onerror = () => {
-    $("micHint").textContent = "마이크 인식 중 오류가 발생했어요. 다시 시도해주세요.";
+
+  // 말이 잠시 없을 때 나는 no-speech 등은 오류가 아니라서 그대로 이어서 들어요.
+  const FATAL_ERRORS = {
+    "not-allowed": "마이크 사용이 허용되지 않았어요. 브라우저 설정에서 마이크를 허용해주세요.",
+    "service-not-allowed": "마이크 사용이 허용되지 않았어요. 브라우저 설정에서 마이크를 허용해주세요.",
+    "audio-capture": "마이크를 찾을 수 없어요. 휴대폰 마이크를 확인해주세요.",
+    "network": "음성인식에는 인터넷이 필요해요. 연결을 확인하고 다시 시도해주세요.",
   };
+  recognition.onerror = (e) => {
+    const msg = FATAL_ERRORS[e.error];
+    if (!msg) return;
+    micError = msg;
+    stopRecording();
+  };
+
   recognition.onend = () => {
     if (recording) {
+      flushInterim();
       // 브라우저가 자동으로 끊는 경우 재시작 (5분 제한 내에서).
       // 끝나자마자 바로 재시작하면 마이크 권한을 계속 다시 물어보는
       // 기기가 있어서, 아주 짧게 텀을 주고 재시작해요.
       setTimeout(() => {
         if (recording) { try { recognition.start(); } catch(e){} }
       }, 300);
+    } else if (stopping) {
+      finishRecording();
     }
   };
 
   micBtn.onclick = () => {
     if (!recording) {
       finalTranscript = "";
+      lastInterim = "";
+      micError = "";
       seconds = 0;
       recording = true;
+      micBusy = true;
       micBtn.classList.add("recording");
       $("micTimer").textContent = "00:00";
       $("micHint").textContent = "듣고 있어요...";
@@ -509,15 +732,39 @@ function setupMic(){
     }
   };
 
+  // 정지 후에 도착하는 마지막 인식 결과까지 받은 뒤 정리해요.
   function stopRecording(){
+    if (!recording) return;
     recording = false;
+    stopping = true;
     micBtn.classList.remove("recording");
+    micBtn.disabled = true;
     clearInterval(timerInterval);
+    $("micHint").textContent = "내용을 정리하고 있어요...";
     try { recognition.stop(); } catch(e){}
+    finishTimer = setTimeout(finishRecording, 1500); // 종료 신호가 오지 않을 때 대비
+  }
+
+  function finishRecording(){
+    if (!stopping) return;
+    stopping = false;
+    clearTimeout(finishTimer);
+    micBtn.disabled = false;
+    micBusy = false;
+    flushInterim();
+
     const cleaned = cleanUpTranscript(finalTranscript);
-    $("summaryText").value = cleaned;
-    $("micHint").textContent = "녹음이 끝났어요. 아래 내용을 확인하고 저장해주세요.";
-    updateDoc(doc(db, "sessions", sessionId), { summary: cleaned, rawTranscript: finalTranscript }).catch(()=>{});
+    if (!cleaned) {
+      $("micHint").textContent = micError || "인식된 내용이 없어요. 다시 녹음하거나 직접 입력해주세요.";
+      return;
+    }
+    // 다시 녹음해도 앞서 적어둔 내용을 지우지 않고 뒤에 이어붙여요.
+    const existing = $("summaryText").value.trim();
+    $("summaryText").value = existing ? existing + "\n" + cleaned : cleaned;
+    summaryDirty = true;
+    $("micHint").textContent = micError || "녹음이 끝났어요. 아래 내용을 확인하고 저장해주세요.";
+    const prevRaw = sessionData?.rawTranscript;
+    saveSummary({ silent: true, extra: { rawTranscript: prevRaw ? prevRaw + "\n" + finalTranscript : finalTranscript } });
   }
 }
 
@@ -546,31 +793,34 @@ function removeRepeatedPhrases(text){
   return words.join(" ");
 }
 
-// 문장 중간에 홀로 끼어드는 추임새(어, 저, 음, 그, 뭐 등)는 단어 단위로 통째로 제거해요.
-// "저는", "그것" 처럼 다른 말에 붙어있는 경우는 다른 단어로 취급되니 건드리지 않아요.
-const FILLER_WORDS = ["어","어어","어어어","음","음음","그","그그","저","저저","뭐","뭐뭐","막","음..","어..","그..","자","응","네","아"];
+// 추임새(어, 저, 음, 그, 뭐 등)는 단어 단위로 통째로 제거해요.
+// "저는", "그것", "인제국유림", "저기" 처럼 뜻이 있는 말은 건드리지 않아요.
+const FILLER_WORDS = [
+  "어","어어","어어어","음","음음","그","그그","저","저저","뭐","뭐뭐","막","음..","어..","그..","자","응","네","아",
+  "음~","음...","음,","어~","어...","어,","그~","자,","저기요","그니까","그러니까요","뭐랄까"
+];
 function stripFillerWords(text){
   const words = (text || "").split(/\s+/).filter(Boolean);
   const kept = words.filter(w => !FILLER_WORDS.includes(w));
   return kept.join(" ");
 }
 
+// 문장이 끝나는 말투에서만 마침표를 찍고 줄을 바꿔요.
+const SENTENCE_END = /(니다|세요|합시다|십시오|까요|해요|어요|아요|죠)$/;
 function cleanUpTranscript(raw){
-  let t = raw || "";
-  t = removeRepeatedPhrases(t);
-  const fillers = ["음~","음...","음,","어~","어...","그~","저기요","저기","인제","이제요","자,","그 뭐냐","뭐랄까","그니까","그러니까요"];
-  fillers.forEach(f => { t = t.split(f).join(""); });
+  let t = removeRepeatedPhrases(raw || "");
+  t = t.replace(/(^|\s)그 뭐냐(?=\s|$)/g, " ");
   t = stripFillerWords(t);
   t = t.replace(/\s{2,}/g, " ").trim();
-  // 문장 부호 없는 긴 구간에 마침표 삽입 (대략 12어절 단위)
-  const words = t.split(" ");
-  let out = [];
-  words.forEach((w, i) => {
-    out.push(w);
-    if ((i+1) % 14 === 0 && !/[.!?]$/.test(w)) out.push(".");
+  if (!t) return "";
+  let out = "";
+  t.split(" ").forEach((w) => {
+    if (/[.!?]$/.test(w)) out += w + "\n";
+    else if (SENTENCE_END.test(w)) out += w + ".\n";
+    else out += w + " ";
   });
-  t = out.join(" ").replace(/\s+\./g, ".").replace(/\.\.+/g, ".");
-  if (t && !/[.!?]$/.test(t)) t += ".";
+  t = out.trim();
+  if (!/[.!?]$/.test(t)) t += ".";
   return t;
 }
 
@@ -597,20 +847,41 @@ function resizeImage(file, maxW=800, quality=0.6){
 
 async function handlePhotoSelect(e){
   const files = Array.from(e.target.files || []);
+  e.target.value = "";
+  if (files.length === 0) return;
+  let failed = 0;
   for (const file of files) {
     try {
       const dataUrl = await resizeImage(file);
       await addDoc(collection(db, "sessions", sessionId, "photos"), {
         dataUrl, uploadedAt: serverTimestamp()
       });
-    } catch(err){ console.error(err); }
+    } catch(err){
+      console.error(err);
+      failed++;
+    }
   }
-  e.target.value = "";
-  toast("사진이 첨부됐어요");
+  if (failed === 0) toast("사진이 첨부됐어요");
+  else toast(`사진 ${failed}장을 올리지 못했어요. 다시 시도해주세요.`);
 }
 
 async function deletePhoto(photoId){
-  await deleteDoc(doc(db, "sessions", sessionId, "photos", photoId));
+  if (!confirm("이 사진을 지울까요?")) return;
+  try {
+    await deleteDoc(doc(db, "sessions", sessionId, "photos", photoId));
+  } catch (err) {
+    console.error(err);
+    toast("사진을 지우지 못했어요");
+  }
+}
+
+// 저장된 값을 HTML로 끼워 넣지 않고, 이미지 데이터일 때만 화면에 표시해요.
+function makePhotoImg(photo){
+  const img = document.createElement("img");
+  const url = String(photo.dataUrl || "");
+  if (url.startsWith("data:image/")) img.src = url;
+  img.alt = "현장 사진";
+  return img;
 }
 
 function renderPhotos(){
@@ -619,11 +890,13 @@ function renderPhotos(){
   photos.forEach(p => {
     const div = document.createElement("div");
     div.className = "photo-thumb";
-    div.innerHTML = `<img src="${p.dataUrl}"><button class="del" data-id="${p.id}">✕</button>`;
+    const del = document.createElement("button");
+    del.type = "button";
+    del.className = "del";
+    del.textContent = "✕";
+    del.onclick = () => deletePhoto(p.id);
+    div.append(makePhotoImg(p), del);
     grid.insertBefore(div, $("photoAddBtn"));
-  });
-  grid.querySelectorAll(".del").forEach(btn => {
-    btn.onclick = () => deletePhoto(btn.dataset.id);
   });
 }
 
@@ -636,27 +909,49 @@ function copyLink(){
 }
 
 function buildPrintSheet(){
-  $("p_date").textContent = $("todayLabel").textContent;
+  if (!sessionId) return;
+  $("p_date").textContent = formatDate(sessionData?.date);
   $("p_headcount").textContent = $("headcount").value || "0";
   $("p_summary").textContent = $("summaryText").value || "(작성된 교육내용 없음)";
+
   const wrap = $("p_workers");
-  const rows = Array.from(document.querySelectorAll("#workerList .worker-row")).map(r => r.textContent).join(" · ");
-  wrap.textContent = rows || "확인자 없음";
+  wrap.innerHTML = "";
+  if (workers.length === 0) wrap.textContent = "확인자 없음";
+  workers.forEach((w, i) => {
+    const row = document.createElement("div");
+    row.className = "worker-row";
+    const name = document.createElement("span");
+    name.textContent = `${i + 1}. ${w.name}`;
+    const time = document.createElement("span");
+    time.textContent = `${workerTime(w)} 확인`;
+    row.append(name, time);
+    wrap.appendChild(row);
+  });
+
   const pgrid = $("p_photos");
-  pgrid.innerHTML = photos.map(p => `<div class="photo-thumb"><img src="${p.dataUrl}"></div>`).join("");
+  pgrid.innerHTML = "";
+  photos.forEach((p) => {
+    const div = document.createElement("div");
+    div.className = "photo-thumb";
+    div.appendChild(makePhotoImg(p));
+    pgrid.appendChild(div);
+  });
 }
 
-function printLog(){
+async function printLog(){
   buildPrintSheet();
-  $("printSheet").style.display = "block";
+  // 사진이 그려지기 전에 인쇄되어 빈칸이 나오지 않게 기다려요.
+  const imgs = Array.from($("p_photos").querySelectorAll("img"));
+  await Promise.all(imgs.map(img => img.decode ? img.decode().catch(()=>{}) : null));
   window.print();
-  $("printSheet").style.display = "none";
 }
 
 function emailLog(){
-  const subject = encodeURIComponent(`TBM 일지 - ${$("todayLabel").textContent}`);
+  const dateText = formatDate(sessionData?.date);
+  const names = workers.map(w => `${w.name} (${workerTime(w)})`).join(", ") || "확인자 없음";
+  const subject = encodeURIComponent(`TBM 일지 - ${dateText}`);
   const body = encodeURIComponent(
-    `TBM(작업전안전회의) 실시일지\n\n일자: ${$("todayLabel").textContent}\n인원: ${$("headcount").value || 0}명\n\n[교육내용]\n${$("summaryText").value}\n\n※ 사진과 서명자 목록은 인쇄/PDF저장 기능으로 함께 보관해주세요.`
+    `TBM(작업전안전회의) 실시일지\n\n일자: ${dateText}\n인원: ${$("headcount").value || 0}명\n\n[교육내용]\n${$("summaryText").value}\n\n[확인자 ${workers.length}명]\n${names}\n\n※ 사진은 인쇄/PDF저장 기능으로 함께 보관해주세요.`
   );
   window.location.href = `mailto:?subject=${subject}&body=${body}`;
 }

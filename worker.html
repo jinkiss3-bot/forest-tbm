@@ -73,6 +73,8 @@
   .rule.checked .box{background:var(--green-ok);border-color:var(--green-ok);color:#fff;}
   .rule .txt{font-size:18px;font-weight:600;line-height:1.5;}
   .rule.checked .txt{color:var(--forest-deep);}
+  #summaryConfirm{margin-top:14px;padding-bottom:0;border-top:1.5px solid var(--line);}
+  .submit-hint{font-size:16px;font-weight:600;color:var(--ink-soft);text-align:center;margin:0 0 12px;}
 
   label{display:block;font-size:16px;font-weight:700;color:var(--ink-soft);margin-bottom:10px;}
   input[type=text]{
@@ -121,6 +123,12 @@
     <p>관리자에게 오늘의 새 링크를 다시 받아주세요.</p>
   </div>
 
+  <div id="expiredScreen" class="center-screen" hidden>
+    <div class="icon">📅</div>
+    <h1>지난 TBM 링크예요</h1>
+    <p>관리자에게 오늘의 새 링크를 받아주세요.</p>
+  </div>
+
   <div id="mainScreen" hidden>
     <header>
       <div class="badge">오늘의 TBM 확인</div>
@@ -131,6 +139,10 @@
     <div class="card">
       <h2>📋 오늘의 교육내용</h2>
       <div class="summary-text" id="summaryText"><span class="summary-empty">관리자가 곧 내용을 올릴 예정이에요. 잠시만 기다려주세요.</span></div>
+      <div class="rule" id="summaryConfirm" hidden>
+        <div class="box">✓</div>
+        <div class="txt">위 교육내용을 확인했습니다</div>
+      </div>
     </div>
 
     <div class="card">
@@ -142,9 +154,10 @@
       <h2>✍️ 이름 확인</h2>
       <label>본인 이름을 눌러 선택하거나 새로 입력해주세요</label>
       <div class="name-suggestions" id="nameSuggestions"></div>
-      <input type="text" id="nameInput" placeholder="이름 입력">
+      <input type="text" id="nameInput" placeholder="이름 입력" maxlength="20">
     </div>
 
+    <p class="submit-hint" id="submitHint"></p>
     <button class="submit-btn" id="submitBtn" disabled>확인 완료</button>
   </div>
 
@@ -159,7 +172,7 @@
 <script type="module">
 import { initializeApp } from "https://www.gstatic.com/firebasejs/10.13.2/firebase-app.js";
 import {
-  getFirestore, doc, getDoc, onSnapshot, collection, addDoc,
+  getFirestore, doc, getDoc, onSnapshot, collection,
   serverTimestamp, setDoc, getDocs
 } from "https://www.gstatic.com/firebasejs/10.13.2/firebase-firestore.js";
 
@@ -188,9 +201,32 @@ const sessionId = params.get("session");
 
 const checked = new Array(RULES.length).fill(false);
 let selectedName = "";
+let currentSummary = "";
+let summaryConfirmed = false;
 
 function show(id){
-  ["loadingScreen","errorScreen","mainScreen","doneScreen"].forEach(x => $(x).hidden = (x !== id));
+  ["loadingScreen","errorScreen","expiredScreen","mainScreen","doneScreen"].forEach(x => $(x).hidden = (x !== id));
+}
+
+function todayStr(){
+  const d = new Date();
+  return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,"0")}-${String(d.getDate()).padStart(2,"0")}`;
+}
+
+// 이름은 저장 경로에도 쓰이므로 "/"는 빼고, 띄어쓰기는 한 칸으로 맞춰요.
+function normalizeName(s){
+  return String(s || "").replace(/\//g, "").replace(/\s+/g, " ").trim();
+}
+
+// "김 철수"와 "김철수"를 같은 사람으로 보고 한 번만 저장해요.
+function completionId(name){
+  return "n_" + encodeURIComponent(name.replace(/\s+/g, ""));
+}
+
+function setSummaryConfirmed(value){
+  summaryConfirmed = value;
+  $("summaryConfirm").classList.toggle("checked", value);
+  updateSubmitState();
 }
 
 async function main(){
@@ -200,8 +236,12 @@ async function main(){
   const snap = await getDoc(sessionRef);
   if (!snap.exists()) { show("errorScreen"); return; }
 
-  show("mainScreen");
   const data = snap.data();
+  // 지난 일지에 나중에 서명이 추가되지 않도록 오늘 링크만 받아요.
+  if (data.date !== todayStr()) { show("expiredScreen"); return; }
+
+  show("mainScreen");
+  $("summaryConfirm").onclick = () => setSummaryConfirmed(!summaryConfirmed);
   $("dateLabel").textContent = new Date(data.date).toLocaleDateString("ko-KR", {year:"numeric",month:"long",day:"numeric",weekday:"long"});
 
   onSnapshot(sessionRef, (s) => {
@@ -210,9 +250,17 @@ async function main(){
     $("summaryText").innerHTML = d.summary
       ? escapeHtml(d.summary)
       : '<span class="summary-empty">관리자가 곧 내용을 올릴 예정이에요. 잠시만 기다려주세요.</span>';
+    // 교육내용이 바뀌면 바뀐 내용을 다시 확인하도록 체크를 풀어요.
+    const nextSummary = (d.summary || "").trim();
+    if (nextSummary !== currentSummary) {
+      currentSummary = nextSummary;
+      $("summaryConfirm").hidden = !currentSummary;
+      setSummaryConfirmed(false);
+    }
   });
 
   renderRules();
+  updateSubmitState();
   await loadNameSuggestions();
   setupNameInput();
   $("submitBtn").onclick = submit;
@@ -256,7 +304,7 @@ async function loadNameSuggestions(){
 
 function setupNameInput(){
   $("nameInput").addEventListener("input", () => {
-    selectedName = $("nameInput").value.trim();
+    selectedName = normalizeName($("nameInput").value);
     document.querySelectorAll(".name-chip").forEach(b => b.classList.toggle("active", b.dataset.name === selectedName));
     updateSubmitState();
   });
@@ -264,22 +312,42 @@ function setupNameInput(){
 
 function updateSubmitState(){
   const allChecked = checked.every(Boolean);
-  const hasName = selectedName.trim().length > 0;
-  $("submitBtn").disabled = !(allChecked && hasName);
+  const hasName = normalizeName(selectedName).length > 0;
+  $("submitBtn").disabled = !(currentSummary && summaryConfirmed && allChecked && hasName);
+
+  // 버튼이 왜 안 눌리는지 알 수 있게 남은 일을 하나씩 알려줘요.
+  let hint = "";
+  if (!currentSummary) hint = "교육내용이 올라오면 확인할 수 있어요";
+  else if (!summaryConfirmed) hint = "교육내용을 읽고 확인 칸을 눌러주세요";
+  else if (!allChecked) hint = "안전수칙을 모두 눌러주세요";
+  else if (!hasName) hint = "이름을 입력해주세요";
+  $("submitHint").textContent = hint;
 }
 
 async function submit(){
   if ($("submitBtn").disabled) return;
   $("submitBtn").disabled = true;
   $("submitBtn").textContent = "저장 중...";
+  const name = normalizeName(selectedName);
   try {
-    await addDoc(collection(db, "sessions", sessionId, "completions"), {
-      name: selectedName.trim(),
+    const completionRef = doc(db, "sessions", sessionId, "completions", completionId(name));
+    const existing = await getDoc(completionRef);
+    if (existing.exists()) {
+      $("doneName").textContent = `${name}님은 이미 확인하셨어요. 오늘도 안전한 작업 되세요.`;
+      show("doneScreen");
+      return;
+    }
+    await setDoc(completionRef, {
+      name,
       checkedItems: checked,
+      summaryConfirmed: true,
       completedAt: serverTimestamp(),
     });
-    await setDoc(doc(db, "workerNames", selectedName.trim()), { updatedAt: serverTimestamp() }, { merge: true });
-    $("doneName").textContent = `${selectedName.trim()}님, 확인 감사합니다. 오늘도 안전한 작업 되세요.`;
+    // 이름 버튼 저장에 실패해도 확인 기록은 이미 남았으니 완료로 처리해요.
+    try {
+      await setDoc(doc(db, "workerNames", name), { updatedAt: serverTimestamp() }, { merge: true });
+    } catch (err) { console.error(err); }
+    $("doneName").textContent = `${name}님, 확인 감사합니다. 오늘도 안전한 작업 되세요.`;
     show("doneScreen");
   } catch(e){
     console.error(e);
