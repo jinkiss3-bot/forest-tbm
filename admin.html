@@ -160,6 +160,18 @@
   .toast.show{opacity:1;}
 
   .mic-btn[disabled]{opacity:0.5;}
+  .ai-note{font-size:13px;line-height:1.6;color:var(--ink-soft);margin-top:10px;}
+  .ai-note b{color:var(--forest-deep);}
+  .raw-box{margin-top:10px;font-size:13px;color:var(--ink-soft);}
+  .raw-box summary{cursor:pointer;font-weight:700;}
+  .raw-box div{margin-top:8px;padding:12px;background:var(--sage-tint);border-radius:10px;white-space:pre-wrap;line-height:1.6;color:var(--ink);}
+  .publish-box{margin-top:16px;padding-top:16px;border-top:1px solid var(--line);}
+  .publish-state{font-size:14px;font-weight:700;margin-bottom:10px;color:var(--orange-deep);}
+  .publish-state.ok{color:var(--green-ok);}
+  .photo-status{font-size:13.5px;font-weight:700;color:var(--forest-deep);min-height:0;margin-bottom:6px;}
+  .photo-add.is-disabled{opacity:0.4;cursor:not-allowed;}
+  .worker-stale{color:var(--red);font-weight:700;font-size:12px;}
+  .log-sign img{display:block;max-width:100%;height:30px;margin:0 auto;object-fit:contain;}
   .photo-add{flex-direction:column;gap:4px;text-align:center;}
   .photo-add span{font-size:12px;font-weight:700;color:var(--ink);}
   .rec-choice{display:none;background:var(--sage-tint);border-radius:12px;padding:14px;margin-top:14px;text-align:left;}
@@ -244,7 +256,7 @@
 
         <div class="card">
           <h2>지난 일지</h2>
-          <p class="desc">최근 30건을 볼 수 있어요. 누르면 내용 확인과 인쇄를 할 수 있어요.</p>
+          <p class="desc">최근 7건을 볼 수 있어요. 누르면 내용 확인과 인쇄를 할 수 있어요.</p>
           <div id="historyList"><div class="empty-note">불러오는 중...</div></div>
         </div>
 
@@ -289,14 +301,28 @@
           </div>
           <div style="margin-top:16px;">
             <div class="transcript-label">교육내용 (자동 정리됨 · 직접 수정 가능)</div>
-            <textarea id="summaryText" placeholder="녹음하면 여기에 자동으로 채워져요. 직접 수정하셔도 됩니다."></textarea>
+            <textarea id="summaryText" placeholder="녹음하면 여기에 AI가 정리해 드려요. 직접 수정하셔도 됩니다."></textarea>
           </div>
-          <button class="btn btn-outline" id="saveSummaryBtn" style="margin-top:12px;">교육내용 저장</button>
+          <div class="ai-note" id="aiCorrections"></div>
+          <details class="raw-box" id="rawBox">
+            <summary>받아쓴 원문 보기</summary>
+            <div id="rawText"></div>
+          </details>
+          <div class="btn-row" style="margin-top:12px;">
+            <button class="btn btn-outline" id="saveSummaryBtn">교육내용 저장</button>
+            <button class="btn btn-ghost" id="aiTidyBtn">AI로 정리</button>
+          </div>
+          <div class="publish-box">
+            <div class="publish-state" id="publishState">근로자에게 아직 공개하지 않았어요</div>
+            <button class="btn btn-orange" id="publishBtn">근로자에게 공개</button>
+            <p class="desc" style="margin:8px 0 0;">내용을 확인한 뒤 눌러 주세요. 누르기 전에는 근로자 화면에 보이지 않아요.</p>
+          </div>
         </div>
 
         <div class="card">
           <h2>현장 사진</h2>
-          <p class="desc">사진 버튼을 눌러 촬영하면 일지에 자동으로 첨부돼요. 개수 제한 없어요.</p>
+          <p class="desc">직접 찍거나 앨범에서 골라 일지에 첨부해요. 일지 한 건에 4장까지 넣을 수 있어요.</p>
+          <div class="photo-status" id="photoStatus"></div>
           <p class="desc" id="photoNote" style="display:none;color:var(--red);font-weight:700;">카메라에서 돌아오면서 화면이 새로 열렸어요. 사진이 아래에 없으면 휴대폰 카메라 앱으로 찍은 뒤 앨범에서 선택해 주세요.</p>
           <div class="photo-grid" id="photoGrid">
             <div class="photo-add" id="photoAddBtn">📷<span>사진 찍기</span></div>
@@ -308,7 +334,7 @@
 
         <div class="card" id="linkCard">
           <h2>근로자 확인 링크</h2>
-          <p class="desc">아래 링크를 복사해서 현장 단체 카톡방에 붙여넣어 주세요.</p>
+          <p class="desc">교육내용을 공개한 뒤, 아래 링크를 복사해서 현장 단체 카톡방에 붙여넣어 주세요.</p>
           <div class="link-box">
             <span id="workerLink" style="flex:1;">-</span>
             <button class="copy-btn" id="copyLinkBtn">복사</button>
@@ -331,6 +357,9 @@
             <button class="btn btn-ghost" id="printBtn">🖨️ 인쇄 / PDF저장</button>
             <button class="btn btn-ghost" id="emailBtn">✉️ 이메일로 보내기</button>
           </div>
+          <label for="emailAddress" style="margin-top:14px;">받을 이메일 (한 번 입력하면 기억해요)</label>
+          <input type="text" id="emailAddress" inputmode="email" autocomplete="email" placeholder="예: name@example.com">
+          <p class="desc" style="margin:8px 0 0;">메일 앱이 열리면 보내기를 직접 눌러 주세요. PDF는 인쇄 / PDF저장으로 만들어 첨부할 수 있어요.</p>
         </div>
 
         <div class="card" id="printSheet">
@@ -380,6 +409,9 @@ const app = initializeApp(firebaseConfig);
 const db = getFirestore(app);
 
 const ADMIN_PASSCODE = "1234"; // 데모용 · 실제 운영 시 별도 인증으로 교체 권장
+const AI_SUMMARY_URL = "https://forest-tbm-ai.jinkiss3.workers.dev/";
+const MAX_PHOTOS = 4;
+const HISTORY_LIMIT = 7;
 
 const $ = (id) => document.getElementById(id);
 function toast(msg){
@@ -464,6 +496,9 @@ let headcountNow = 0;
 let summaryDirty = false; // 저장되지 않은 교육내용 수정이 있는지
 let micBusy = false;      // 녹음 중이거나 녹음 내용을 정리하는 중인지
 let printPrepared = false; // 인쇄 버튼으로 일지와 사진을 이미 준비했는지
+let rawWorkers = [];       // 서버에서 받은 확인 기록 그대로
+let photosUploading = false;
+let aiBusy = false;
 
 function todayStr(){
   const d = new Date();
@@ -481,12 +516,20 @@ function init(){
   $("startBtn").onclick = startSession;
   $("backBtn").onclick = goHome;
   $("saveSummaryBtn").onclick = () => saveSummary();
-  $("summaryText").oninput = () => { summaryDirty = true; };
+  $("summaryText").oninput = () => { summaryDirty = true; updatePublishState(); };
+  $("publishBtn").onclick = publishSummary;
+  $("aiTidyBtn").onclick = tidyWithAI;
+  $("emailAddress").value = savedEmailAddress();
+  $("emailAddress").onchange = saveEmailAddress;
   $("summaryText").onchange = () => { if (summaryDirty) saveSummary({ silent: true }); };
   $("headcount").onchange = saveHeadcount;
   $("leaderName").onchange = saveLeader;
-  $("photoAddBtn").onclick = () => { setPhotoPending(true); $("photoInput").click(); };
-  $("photoGalleryBtn").onclick = () => $("photoGalleryInput").click();
+  $("photoAddBtn").onclick = () => {
+    if (!canAddPhoto()) return;
+    setPhotoPending(true);
+    $("photoInput").click();
+  };
+  $("photoGalleryBtn").onclick = () => { if (canAddPhoto()) $("photoGalleryInput").click(); };
   $("photoInput").onchange = handlePhotoSelect;
   $("photoGalleryInput").onchange = handlePhotoSelect;
   $("photoInput").addEventListener("cancel", () => setPhotoPending(false));
@@ -524,13 +567,18 @@ async function goHome(){
 async function loadHistory(){
   const wrap = $("historyList");
   try {
-    const snap = await getDocs(query(collection(db, "sessions"), orderBy("createdAt", "desc"), limit(30)));
+    const snap = await getDocs(query(collection(db, "sessions"), orderBy("createdAt", "desc"), limit(40)));
+    // 시작만 하고 아무것도 입력하지 않은 일지는 목록에서 뺍니다.
+    const docs = snap.docs.filter((d) => {
+      const data = d.data();
+      return (data.summary || "").trim() || (data.publishedSummary || "").trim() || data.headcount > 0;
+    }).slice(0, HISTORY_LIMIT);
     wrap.innerHTML = "";
-    if (snap.empty) {
+    if (docs.length === 0) {
       wrap.innerHTML = '<div class="empty-note">아직 저장된 일지가 없어요</div>';
       return;
     }
-    snap.docs.forEach((d) => {
+    docs.forEach((d) => {
       const data = d.data();
       const row = document.createElement("button");
       row.type = "button";
@@ -634,6 +682,11 @@ function openSession(id){
   $("headcount").value = "";
   $("leaderName").value = savedLeaderName();
   $("summaryText").value = "";
+  rawWorkers = [];
+  $("photoStatus").textContent = "";
+  $("aiCorrections").innerHTML = "";
+  $("rawBox").style.display = "none";
+  $("rawBox").open = false;
   $("micTimer").textContent = "00:00";
   $("micHint").textContent = "버튼을 누르면 녹음이 시작돼요";
   if ($("recChoice").style.display === "block") {
@@ -664,6 +717,9 @@ function attachSession(){
     // 아직 저장하지 않은 수정 내용은 서버 값으로 덮어쓰지 않아요.
     if (!summaryDirty && document.activeElement !== $("summaryText")) $("summaryText").value = d.summary || "";
     updateProgressUI(d.headcount || 0);
+    renderAiInfo();
+    updatePublishState();
+    renderWorkers(rawWorkers);
   }));
 
   // photos
@@ -718,7 +774,14 @@ function workerTime(w){
   return t.toLocaleTimeString("ko-KR", {hour:"2-digit", minute:"2-digit"});
 }
 
+// 공개한 내용이 바뀐 뒤 아직 다시 확인하지 않은 사람인지 확인해요.
+function isStaleWorker(w){
+  const current = sessionData?.publishedVersion || 0;
+  return current > 0 && (w.summaryVersion || 0) !== current;
+}
+
 function renderWorkers(list){
+  rawWorkers = list;
   // 예전 일지에 같은 이름이 여러 번 저장돼 있어도 한 명으로 셉니다.
   const seen = new Set();
   workers = list.filter((w) => {
@@ -733,9 +796,114 @@ function renderWorkers(list){
     wrap.innerHTML = '<div class="empty-note">아직 확인한 근로자가 없어요</div>';
     return;
   }
-  wrap.innerHTML = workers.map(w =>
-    `<div class="worker-row"><span>✅ ${escapeHtml(w.name)}</span><span class="worker-time">${workerTime(w)} 완료</span></div>`
-  ).join("");
+  wrap.innerHTML = workers.map((w) => {
+    const stale = isStaleWorker(w);
+    const status = stale
+      ? '<span class="worker-stale">변경 전 내용 확인</span>'
+      : `<span class="worker-time">${workerTime(w)} 완료</span>`;
+    return `<div class="worker-row"><span>${stale ? "⚠️" : "✅"} ${escapeHtml(w.name)}</span>${status}</div>`;
+  }).join("");
+}
+
+// ---------- 근로자 공개 ----------
+function updatePublishState(){
+  const el = $("publishState");
+  const published = sessionData?.publishedSummary || "";
+  const text = $("summaryText").value.trim();
+  el.classList.remove("ok");
+  if (!published) {
+    el.textContent = "근로자에게 아직 공개하지 않았어요";
+  } else if (text !== published) {
+    el.textContent = "수정한 내용이 아직 공개되지 않았어요";
+  } else {
+    el.textContent = "✓ 근로자에게 공개했어요";
+    el.classList.add("ok");
+  }
+}
+
+async function publishSummary(){
+  const text = $("summaryText").value.trim();
+  if (!text) { toast("공개할 교육내용을 먼저 입력해주세요"); return; }
+  if (micBusy || aiBusy) { toast("정리가 끝난 뒤 다시 눌러주세요"); return; }
+  if (text === (sessionData?.publishedSummary || "")) { toast("이미 공개한 내용이에요"); return; }
+  const version = (sessionData?.publishedVersion || 0) + 1;
+  if (version > 1 && workers.length > 0
+      && !confirm(`먼저 확인한 ${workers.length}명은 바뀐 내용을 다시 확인해야 해요. 공개할까요?`)) return;
+  const btn = $("publishBtn");
+  btn.disabled = true;
+  try {
+    await updateDoc(doc(db, "sessions", sessionId), {
+      summary: text,
+      publishedSummary: text,
+      publishedVersion: version,
+      publishedAt: serverTimestamp(),
+    });
+    if ($("summaryText").value.trim() === text) summaryDirty = false;
+    toast("근로자에게 공개했어요");
+  } catch (err) {
+    console.error(err);
+    toast("공개하지 못했어요. 인터넷 연결을 확인해주세요.");
+  } finally {
+    btn.disabled = false;
+  }
+}
+
+// ---------- AI 정리 ----------
+async function summarizeWithAI(text){
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), 60000);
+  try {
+    const res = await fetch(AI_SUMMARY_URL, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ text }),
+      signal: controller.signal,
+    });
+    if (!res.ok) throw new Error("AI summary failed: " + res.status);
+    const data = await res.json();
+    if (!data.summary) throw new Error("AI summary was empty");
+    return { summary: data.summary, corrections: data.corrections || [] };
+  } catch (err) {
+    console.error(err);
+    return null;
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+function renderAiInfo(){
+  const list = sessionData?.corrections || [];
+  const box = $("aiCorrections");
+  box.innerHTML = "";
+  if (list.length > 0) {
+    const title = document.createElement("b");
+    title.textContent = "AI가 바꾼 말: ";
+    box.appendChild(title);
+    box.appendChild(document.createTextNode(list.map(c => `${c.original} → ${c.corrected}`).join(", ")));
+  }
+  const raw = (sessionData?.rawTranscript || "").trim();
+  $("rawBox").style.display = raw ? "block" : "none";
+  $("rawText").textContent = raw;
+}
+
+async function tidyWithAI(){
+  const text = $("summaryText").value.trim();
+  if (!text) { toast("정리할 내용을 먼저 입력해주세요"); return; }
+  if (micBusy || aiBusy) return;
+  aiBusy = true;
+  const btn = $("aiTidyBtn");
+  btn.disabled = true;
+  btn.textContent = "정리 중...";
+  const result = await summarizeWithAI(text);
+  aiBusy = false;
+  btn.disabled = false;
+  btn.textContent = "AI로 정리";
+  if (!result) { toast("AI 정리에 실패했어요. 내용은 그대로 두었어요."); return; }
+  $("summaryText").value = result.summary;
+  summaryDirty = true;
+  updatePublishState();
+  await saveSummary({ silent: true, extra: { corrections: result.corrections } });
+  toast("AI가 정리했어요. 내용을 확인해주세요.");
 }
 
 async function saveSummary({ silent = false, extra = {} } = {}){
@@ -906,16 +1074,16 @@ function setupMic(){
     finishTimer = setTimeout(finishRecording, 1500); // 종료 신호가 오지 않을 때 대비
   }
 
-  function finishRecording(){
+  async function finishRecording(){
     if (!stopping) return;
     stopping = false;
     clearTimeout(finishTimer);
-    micBtn.disabled = false;
-    micBusy = false;
     flushInterim();
 
     const cleaned = cleanUpTranscript(finalTranscript);
     if (!cleaned) {
+      micBtn.disabled = false;
+      micBusy = false;
       if (recordMode === "new") {
         $("summaryText").value = summaryBeforeRecording;
         summaryDirty = dirtyBeforeRecording;
@@ -923,13 +1091,23 @@ function setupMic(){
       $("micHint").textContent = micError || "인식된 내용이 없어요. 다시 녹음하거나 직접 입력해주세요.";
       return;
     }
+    $("micHint").textContent = "AI가 내용을 정리하고 있어요...";
+    const ai = await summarizeWithAI(cleaned);
+    micBtn.disabled = false;
+    micBusy = false;
+
+    const newText = ai ? ai.summary : cleaned;
     const existing = $("summaryText").value.trim();
-    $("summaryText").value = recordMode === "append" && existing ? existing + "\n" + cleaned : cleaned;
+    $("summaryText").value = recordMode === "append" && existing ? existing + "\n" + newText : newText;
     summaryDirty = true;
-    $("micHint").textContent = micError || "녹음이 끝났어요. 아래 내용을 확인하고 저장해주세요.";
+    $("micHint").textContent = micError
+      || (ai ? "AI가 정리했어요. 내용을 확인한 뒤 공개해주세요."
+             : "AI 정리에 실패해 받아쓴 글을 넣었어요. 직접 다듬은 뒤 공개해주세요.");
     const prevRaw = sessionData?.rawTranscript;
     const raw = recordMode === "append" && prevRaw ? prevRaw + "\n" + finalTranscript : finalTranscript;
-    saveSummary({ silent: true, extra: { rawTranscript: raw } });
+    const prevCorrections = recordMode === "append" ? (sessionData?.corrections || []) : [];
+    updatePublishState();
+    saveSummary({ silent: true, extra: { rawTranscript: raw, corrections: [...prevCorrections, ...(ai ? ai.corrections : [])] } });
   }
 }
 
@@ -1014,12 +1192,21 @@ async function handlePhotoSelect(e){
   const files = Array.from(e.target.files || []);
   e.target.value = "";
   setPhotoPending(false);
-  if (files.length === 0) return;
+  if (files.length === 0 || photosUploading) return;
   $("photoNote").style.display = "none";
+
+  const room = MAX_PHOTOS - photos.length;
+  if (room <= 0) { toast(`사진은 ${MAX_PHOTOS}장까지 넣을 수 있어요`); return; }
+  const chosen = files.slice(0, room);
+  const skipped = files.length - chosen.length;
+
+  photosUploading = true;
+  renderPhotos();
   let failed = 0;
-  for (const file of files) {
+  for (let i = 0; i < chosen.length; i++) {
+    $("photoStatus").textContent = `사진 올리는 중 (${i + 1}/${chosen.length})`;
     try {
-      const dataUrl = await resizeImage(file);
+      const dataUrl = await resizeImage(chosen[i]);
       await addDoc(collection(db, "sessions", sessionId, "photos"), {
         dataUrl, uploadedAt: serverTimestamp()
       });
@@ -1028,8 +1215,12 @@ async function handlePhotoSelect(e){
       failed++;
     }
   }
-  if (failed === 0) toast("사진이 첨부됐어요");
-  else toast(`사진 ${failed}장을 올리지 못했어요. 다시 시도해주세요.`);
+  photosUploading = false;
+  $("photoStatus").textContent = "";
+  renderPhotos();
+  if (failed > 0) toast(`사진 ${failed}장을 올리지 못했어요. 다시 시도해주세요.`);
+  else if (skipped > 0) toast(`${MAX_PHOTOS}장까지만 넣을 수 있어 ${skipped}장은 뺐어요`);
+  else toast("사진이 첨부됐어요");
 }
 
 async function deletePhoto(photoId){
@@ -1065,6 +1256,19 @@ function renderPhotos(){
     div.append(makePhotoImg(p), del);
     grid.insertBefore(div, $("photoAddBtn"));
   });
+  const blocked = photosUploading || photos.length >= MAX_PHOTOS;
+  $("photoAddBtn").classList.toggle("is-disabled", blocked);
+  $("photoGalleryBtn").classList.toggle("is-disabled", blocked);
+  if (!photosUploading) {
+    $("photoStatus").textContent = photos.length >= MAX_PHOTOS ? `사진은 ${MAX_PHOTOS}장까지 넣을 수 있어요` : "";
+  }
+}
+
+// 사진 칸이 찼거나 올리는 중이면 사진 창을 열지 않아요.
+function canAddPhoto(){
+  if (photosUploading) { toast("사진을 올리는 중이에요"); return false; }
+  if (photos.length >= MAX_PHOTOS) { toast(`사진은 ${MAX_PHOTOS}장까지 넣을 수 있어요`); return false; }
+  return true;
 }
 
 // ---------- link / print / email ----------
@@ -1080,7 +1284,7 @@ function buildPrintSheet(){
   $("p_date").textContent = formatDate(sessionData?.date);
   $("p_headcount").textContent = $("headcount").value || "0";
   $("p_leader").textContent = $("leaderName").value.trim();
-  $("p_summary").textContent = $("summaryText").value || "(작성된 교육내용 없음)";
+  $("p_summary").textContent = summaryForLog() || "(작성된 교육내용 없음)";
 
   // 확인자보다 인원이 많으면 남은 칸은 비워 둬서 손으로 적을 수 있게 해요.
   const wrap = $("p_workers");
@@ -1089,11 +1293,21 @@ function buildPrintSheet(){
   for (let i = 0; i < rowCount; i++) {
     const w = workers[i];
     const row = document.createElement("tr");
-    [String(i + 1), w ? w.name : "", w ? workerTime(w) : "", ""].forEach((text) => {
+    const timeText = w ? workerTime(w) + (isStaleWorker(w) ? " (변경 전 내용 확인)" : "") : "";
+    [String(i + 1), w ? w.name : "", timeText].forEach((text) => {
       const cell = document.createElement("td");
       cell.textContent = text;
       row.appendChild(cell);
     });
+    const signCell = document.createElement("td");
+    const signature = String(w?.signature || "");
+    if (signature.startsWith("data:image/")) {
+      const img = document.createElement("img");
+      img.src = signature;
+      img.alt = "서명";
+      signCell.appendChild(img);
+    }
+    row.appendChild(signCell);
     wrap.appendChild(row);
   }
 
@@ -1118,10 +1332,24 @@ function buildPrintSheet(){
   }
 }
 
+// 일지에는 근로자에게 공개한 내용을 남겨요. 공개 전이라면 작성 중인 내용을 씁니다.
+function summaryForLog(){
+  return sessionData?.publishedSummary || $("summaryText").value;
+}
+
+function warnIfUnpublished(){
+  const published = sessionData?.publishedSummary;
+  if (published && $("summaryText").value.trim() !== published) {
+    toast("공개한 내용으로 만들었어요. 수정한 내용은 공개 후 반영돼요.");
+  }
+}
+
 async function printLog(){
+  if (photosUploading) { toast("사진을 다 올린 뒤 다시 눌러 주세요"); return; }
+  warnIfUnpublished();
   buildPrintSheet();
   // 사진이 그려지기 전에 인쇄되어 빈칸이 나오지 않게 기다려요.
-  const imgs = Array.from($("p_photos").querySelectorAll("img"));
+  const imgs = Array.from($("printSheet").querySelectorAll("img"));
   // 사진 준비가 늦어져도 인쇄 버튼이 멈추지 않게 3초까지만 기다려요.
   const ready = Promise.all(imgs.map(img => img.complete ? null : new Promise((resolve) => {
     img.onload = resolve;
@@ -1134,14 +1362,28 @@ async function printLog(){
   window.print();
 }
 
+function savedEmailAddress(){
+  try { return localStorage.getItem("tbm_email") || ""; }
+  catch (e) { return ""; }
+}
+
+function saveEmailAddress(){
+  try { localStorage.setItem("tbm_email", $("emailAddress").value.trim()); } catch (e) {}
+}
+
 function emailLog(){
+  if (photosUploading) { toast("사진을 다 올린 뒤 다시 눌러 주세요"); return; }
+  saveEmailAddress();
+  warnIfUnpublished();
+  const address = $("emailAddress").value.trim();
+  const to = /^[^\s@?&#,;]+@[^\s@?&#,;]+$/.test(address) ? address : "";
   const dateText = formatDate(sessionData?.date);
   const names = workers.map(w => `${w.name} (${workerTime(w)})`).join(", ") || "확인자 없음";
   const subject = encodeURIComponent(`TBM 일지 - ${dateText}`);
   const body = encodeURIComponent(
-    `TBM(작업전안전회의) 실시일지\n\n일자: ${dateText}\n인원: ${$("headcount").value || 0}명\n\n[교육내용]\n${$("summaryText").value}\n\n[확인자 ${workers.length}명]\n${names}\n\n※ 사진은 인쇄/PDF저장 기능으로 함께 보관해주세요.`
+    `TBM(작업전안전회의) 실시일지\n\n일자: ${dateText}\n인원: ${$("headcount").value || 0}명\n\n[교육내용]\n${summaryForLog()}\n\n[확인자 ${workers.length}명]\n${names}\n\n※ 사진은 인쇄/PDF저장 기능으로 함께 보관해주세요.`
   );
-  window.location.href = `mailto:?subject=${subject}&body=${body}`;
+  window.location.href = `mailto:${to}?subject=${subject}&body=${body}`;
 }
 
 function escapeHtml(s){
