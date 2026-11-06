@@ -303,13 +303,34 @@ function setupSignaturePad(){
 // 저장 용량을 줄이려고 작은 크기로 바꿔서 저장해요.
 function signatureDataUrl(){
   const source = $("signPad");
+  // 서명이 칸 안에서 작게 보이지 않도록 쓴 부분만 잘라서 저장해요.
+  const pixels = source.getContext("2d").getImageData(0, 0, source.width, source.height).data;
+  let left = source.width, right = -1, top = source.height, bottom = -1;
+  for (let y = 0; y < source.height; y++) {
+    for (let x = 0; x < source.width; x++) {
+      if (pixels[(y * source.width + x) * 4 + 3] > 0) {
+        if (x < left) left = x;
+        if (x > right) right = x;
+        if (y < top) top = y;
+        if (y > bottom) bottom = y;
+      }
+    }
+  }
+  if (right < 0) { left = 0; top = 0; right = source.width - 1; bottom = source.height - 1; }
+  const pad = 6;
+  left = Math.max(0, left - pad);
+  top = Math.max(0, top - pad);
+  const cropWidth = Math.min(source.width, right + pad + 1) - left;
+  const cropHeight = Math.min(source.height, bottom + pad + 1) - top;
+
+  const scale = Math.min(1, 400 / cropWidth);
   const out = document.createElement("canvas");
-  out.width = 400;
-  out.height = Math.round(400 * source.height / source.width);
+  out.width = Math.max(1, Math.round(cropWidth * scale));
+  out.height = Math.max(1, Math.round(cropHeight * scale));
   const ctx = out.getContext("2d");
   ctx.fillStyle = "#fff";
   ctx.fillRect(0, 0, out.width, out.height);
-  ctx.drawImage(source, 0, 0, out.width, out.height);
+  ctx.drawImage(source, left, top, cropWidth, cropHeight, 0, 0, out.width, out.height);
   return out.toDataURL("image/png");
 }
 

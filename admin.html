@@ -4,6 +4,10 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
 <title>TBM 관리자 · 벌목현장 안전관리</title>
+<link rel="manifest" href="manifest.webmanifest">
+<meta name="theme-color" content="#1F3D2B">
+<link rel="icon" href="icon-192.png">
+<link rel="apple-touch-icon" href="icon-192.png">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+KR:wght@400;500;700;900&display=swap" rel="stylesheet">
@@ -171,7 +175,10 @@
   .photo-status{font-size:13.5px;font-weight:700;color:var(--forest-deep);min-height:0;margin-bottom:6px;}
   .photo-add.is-disabled{opacity:0.4;cursor:not-allowed;}
   .worker-stale{color:var(--red);font-weight:700;font-size:12px;}
-  .log-sign img{display:block;max-width:100%;height:30px;margin:0 auto;object-fit:contain;}
+  .log-sign img{display:block;width:100%;height:46px;margin:0 auto;object-fit:contain;}
+  #saveSummaryBtn,#aiTidyBtn{white-space:nowrap;padding-left:8px;padding-right:8px;font-size:14px;}
+  .pdf-status{font-size:13.5px;font-weight:700;color:var(--forest-deep);margin-top:10px;}
+  #sharePdfBtn{display:none;margin-top:10px;}
   .photo-add{flex-direction:column;gap:4px;text-align:center;}
   .photo-add span{font-size:12px;font-weight:700;color:var(--ink);}
   .rec-choice{display:none;background:var(--sage-tint);border-radius:12px;padding:14px;margin-top:14px;text-align:left;}
@@ -264,6 +271,18 @@
           <summary>근로자 이름 목록 관리</summary>
           <p class="desc">근로자 화면에 버튼으로 뜨는 이름이에요. 잘못 입력된 이름을 지울 수 있어요.</p>
           <div id="nameList"><div class="empty-note">불러오는 중...</div></div>
+        </details>
+
+        <div class="card" id="installCard" style="display:none;">
+          <h2>휴대폰에 앱으로 설치</h2>
+          <p class="desc">홈 화면에 아이콘을 만들어 바로 열 수 있어요.</p>
+          <button class="btn btn-primary" id="installBtn">홈 화면에 설치</button>
+        </div>
+
+        <details class="card">
+          <summary>이 휴대폰 설정 초기화</summary>
+          <p class="desc">이 기기의 로그인, 오늘 일지 연결, 실시자 이름, 이메일만 지워요. 서버의 일지와 사진은 지워지지 않아요.</p>
+          <button class="btn btn-outline" id="resetDeviceBtn">처음 상태로 되돌리기</button>
         </details>
       </div>
 
@@ -359,7 +378,9 @@
           </div>
           <label for="emailAddress" style="margin-top:14px;">받을 이메일 (한 번 입력하면 기억해요)</label>
           <input type="text" id="emailAddress" inputmode="email" autocomplete="email" placeholder="예: name@example.com">
-          <p class="desc" style="margin:8px 0 0;">메일 앱이 열리면 보내기를 직접 눌러 주세요. PDF는 인쇄 / PDF저장으로 만들어 첨부할 수 있어요.</p>
+          <p class="desc" style="margin:8px 0 0;">이메일로 보내기를 누르면 일지 PDF가 만들어져요. 공유 창에서 메일 앱을 고른 뒤 받는 사람을 확인하고 보내기를 눌러 주세요.</p>
+          <div class="pdf-status" id="pdfStatus"></div>
+          <button class="btn btn-orange" id="sharePdfBtn">만든 PDF 보내기</button>
         </div>
 
         <div class="card" id="printSheet">
@@ -412,6 +433,23 @@ const ADMIN_PASSCODE = "1234"; // 데모용 · 실제 운영 시 별도 인증�
 const AI_SUMMARY_URL = "https://forest-tbm-ai.jinkiss3.workers.dev/";
 const MAX_PHOTOS = 4;
 const HISTORY_LIMIT = 7;
+const PAGE_TITLE = document.title;
+
+// 설치 조건이 맞을 때 브라우저가 알려 주면 설치 버튼을 보여줘요.
+let installPrompt = null;
+window.addEventListener("beforeinstallprompt", (e) => {
+  e.preventDefault();
+  installPrompt = e;
+  $("installCard").style.display = "block";
+});
+window.addEventListener("appinstalled", () => { $("installCard").style.display = "none"; });
+document.getElementById("installBtn").onclick = async () => {
+  if (!installPrompt) return;
+  installPrompt.prompt();
+  await installPrompt.userChoice;
+  installPrompt = null;
+  $("installCard").style.display = "none";
+};
 
 const $ = (id) => document.getElementById(id);
 function toast(msg){
@@ -518,6 +556,8 @@ function init(){
   $("saveSummaryBtn").onclick = () => saveSummary();
   $("summaryText").oninput = () => { summaryDirty = true; updatePublishState(); };
   $("publishBtn").onclick = publishSummary;
+  $("resetDeviceBtn").onclick = resetDevice;
+  $("sharePdfBtn").onclick = () => { if (pendingPdf) deliverPdf(pendingPdf); };
   $("aiTidyBtn").onclick = tidyWithAI;
   $("emailAddress").value = savedEmailAddress();
   $("emailAddress").onchange = saveEmailAddress;
@@ -537,8 +577,15 @@ function init(){
   $("copyLinkBtn").onclick = copyLink;
   $("printBtn").onclick = printLog;
   $("emailBtn").onclick = emailLog;
-  window.addEventListener("beforeprint", () => { if (!printPrepared) buildPrintSheet(); });
-  window.addEventListener("afterprint", () => { printPrepared = false; });
+  window.addEventListener("beforeprint", () => {
+    if (!sessionId) return;
+    document.title = logFileName();
+    if (!printPrepared) buildPrintSheet();
+  });
+  window.addEventListener("afterprint", () => {
+    printPrepared = false;
+    document.title = PAGE_TITLE;
+  });
   setupMic();
 
   // 오늘 이미 시작한 세션이 있으면 이어서
@@ -684,6 +731,9 @@ function openSession(id){
   $("summaryText").value = "";
   rawWorkers = [];
   $("photoStatus").textContent = "";
+  $("pdfStatus").textContent = "";
+  $("sharePdfBtn").style.display = "none";
+  pendingPdf = null;
   $("aiCorrections").innerHTML = "";
   $("rawBox").style.display = "none";
   $("rawBox").open = false;
@@ -890,6 +940,7 @@ async function tidyWithAI(){
   const text = $("summaryText").value.trim();
   if (!text) { toast("정리할 내용을 먼저 입력해주세요"); return; }
   if (micBusy || aiBusy) return;
+  if (!confirm("지금 글을 AI가 다시 정리해요. 직접 고친 내용이 바뀔 수 있어요. 계속할까요?")) return;
   aiBusy = true;
   const btn = $("aiTidyBtn");
   btn.disabled = true;
@@ -1359,6 +1410,7 @@ async function printLog(){
   await new Promise(resolve => setTimeout(resolve, 300));
   // 준비한 사진이 인쇄 직전에 다시 만들어지지 않게 표시해 둬요.
   printPrepared = true;
+  document.title = logFileName();
   window.print();
 }
 
@@ -1371,17 +1423,182 @@ function saveEmailAddress(){
   try { localStorage.setItem("tbm_email", $("emailAddress").value.trim()); } catch (e) {}
 }
 
-function emailLog(){
-  if (photosUploading) { toast("사진을 다 올린 뒤 다시 눌러 주세요"); return; }
-  saveEmailAddress();
-  warnIfUnpublished();
+function logFileName(){
+  return `TBM일지_${sessionData?.date || todayStr()}`;
+}
+
+function resetDevice(){
+  if (!confirm("이 휴대폰의 로그인, 오늘 일지 연결, 실시자 이름, 이메일을 지울까요? 서버의 일지와 사진은 지워지지 않아요.")) return;
+  try {
+    const keys = [];
+    for (let i = 0; i < localStorage.length; i++) keys.push(localStorage.key(i));
+    keys.filter(key => key.startsWith("tbm_")).forEach(key => localStorage.removeItem(key));
+  } catch (err) { console.error(err); }
+  location.reload();
+}
+
+// ---------- PDF 만들기와 보내기 ----------
+let pendingPdf = null;
+let pdfBusy = false;
+
+function loadScript(src, integrity){
+  return new Promise((resolve, reject) => {
+    const script = document.createElement("script");
+    script.src = src;
+    script.integrity = integrity;
+    script.crossOrigin = "anonymous";
+    script.onload = resolve;
+    script.onerror = () => reject(new Error("Could not load " + src));
+    document.head.appendChild(script);
+  });
+}
+
+async function loadPdfLibraries(){
+  if (!window.html2canvas) {
+    await loadScript("https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js",
+      "sha384-ZZ1pncU3bQe8y31yfZdMFdSpttDoPmOZg2wguVK9almUodir1PghgT0eY7Mrty8H");
+  }
+  if (!window.jspdf) {
+    await loadScript("https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js",
+      "sha384-JcnsjUPPylna1s1fvi1u12X5qjY5OL56iySh75FdtrwhO/SWXgMjoVqcKyIIWOLk");
+  }
+}
+
+// 표의 줄 경계에서 쪽을 나눠 줄이 잘리지 않게 해요.
+function pageBreaks(sheet, canvas){
+  const rect = sheet.getBoundingClientRect();
+  const ratio = canvas.height / rect.height;
+  const points = [];
+  sheet.querySelectorAll("tr").forEach(el => points.push((el.getBoundingClientRect().bottom - rect.top) * ratio));
+  sheet.querySelectorAll("h2").forEach(el => points.push((el.getBoundingClientRect().top - rect.top) * ratio));
+  return points.sort((a, b) => a - b);
+}
+
+async function createLogPdf(){
+  await loadPdfLibraries();
+  buildPrintSheet();
+  const sheet = $("printSheet");
+  const imgs = Array.from(sheet.querySelectorAll("img"));
+  const ready = Promise.all(imgs.map(img => img.complete ? null : new Promise((resolve) => {
+    img.onload = resolve;
+    img.onerror = resolve;
+  })));
+  await Promise.race([ready, new Promise(resolve => setTimeout(resolve, 3000))]);
+  if (document.fonts?.ready) await document.fonts.ready;
+
+  const canvas = await window.html2canvas(sheet, { scale: 2, backgroundColor: "#ffffff", logging: false });
+  const pdf = new window.jspdf.jsPDF({ unit: "mm", format: "a4", compress: true });
+  const margin = 12;
+  const contentWidth = 210 - margin * 2;
+  const contentHeight = 297 - margin * 2;
+  const pxPerMm = canvas.width / contentWidth;
+  const maxSlice = contentHeight * pxPerMm;
+  const breaks = pageBreaks(sheet, canvas);
+
+  let start = 0;
+  let first = true;
+  while (start < canvas.height - 1) {
+    let end = canvas.height;
+    if (start + maxSlice < canvas.height) {
+      const limit = start + maxSlice;
+      end = breaks.filter(point => point > start + 1 && point <= limit).pop() || limit;
+    }
+    const slice = document.createElement("canvas");
+    slice.width = canvas.width;
+    slice.height = Math.ceil(end - start);
+    const ctx = slice.getContext("2d");
+    ctx.fillStyle = "#ffffff";
+    ctx.fillRect(0, 0, slice.width, slice.height);
+    ctx.drawImage(canvas, 0, -start);
+    if (!first) pdf.addPage();
+    pdf.addImage(slice.toDataURL("image/jpeg", 0.85), "JPEG", margin, margin, contentWidth, slice.height / pxPerMm);
+    first = false;
+    start = end;
+  }
+  const name = `${logFileName()}.pdf`;
+  return new File([pdf.output("blob")], name, { type: "application/pdf" });
+}
+
+function downloadFile(file){
+  const url = URL.createObjectURL(file);
+  const link = document.createElement("a");
+  link.href = url;
+  link.download = file.name;
+  document.body.appendChild(link);
+  link.click();
+  link.remove();
+  setTimeout(() => URL.revokeObjectURL(url), 60000);
+}
+
+async function deliverPdf(file){
   const address = $("emailAddress").value.trim();
   const to = /^[^\s@?&#,;]+@[^\s@?&#,;]+$/.test(address) ? address : "";
+  $("sharePdfBtn").style.display = "none";
+
+  if (navigator.canShare?.({ files: [file] })) {
+    // 공유 창에서는 받는 사람을 미리 넣을 수 없어 주소를 복사해 둬요.
+    if (to) { try { await navigator.clipboard.writeText(to); } catch (err) { console.error(err); } }
+    try {
+      await navigator.share({ files: [file], title: file.name });
+      $("pdfStatus").textContent = to
+        ? `공유 창을 열었어요. 받는 사람(${to})을 확인해 주세요.`
+        : "공유 창을 열었어요.";
+      pendingPdf = null;
+    } catch (err) {
+      if (err.name === "AbortError") {
+        $("pdfStatus").textContent = "보내기를 취소했어요.";
+        $("sharePdfBtn").style.display = "block";
+        return;
+      }
+      if (err.name === "NotAllowedError") {
+        // PDF를 오래 만들면 브라우저가 버튼을 한 번 더 누르도록 요구해요.
+        $("pdfStatus").textContent = "PDF가 준비됐어요. 아래 버튼을 눌러 보내 주세요.";
+        $("sharePdfBtn").style.display = "block";
+        return;
+      }
+      console.error(err);
+      downloadFile(file);
+      $("pdfStatus").textContent = "공유하지 못해 PDF를 내려받았어요. 메일에 직접 첨부해 주세요.";
+      openMailDraft(to);
+    }
+    return;
+  }
+
+  downloadFile(file);
+  $("pdfStatus").textContent = "PDF를 내려받았어요. 열리는 메일에 직접 첨부해 주세요.";
+  openMailDraft(to);
+}
+
+async function emailLog(){
+  if (photosUploading) { toast("사진을 다 올린 뒤 다시 눌러 주세요"); return; }
+  if (pdfBusy) return;
+  saveEmailAddress();
+  warnIfUnpublished();
+  pdfBusy = true;
+  const btn = $("emailBtn");
+  btn.disabled = true;
+  $("sharePdfBtn").style.display = "none";
+  $("pdfStatus").textContent = "PDF를 만들고 있어요...";
+  try {
+    pendingPdf = await createLogPdf();
+  } catch (err) {
+    console.error(err);
+    pendingPdf = null;
+    $("pdfStatus").textContent = "PDF를 만들지 못했어요. 인터넷 연결을 확인하거나 인쇄 / PDF저장을 이용해 주세요.";
+    return;
+  } finally {
+    pdfBusy = false;
+    btn.disabled = false;
+  }
+  await deliverPdf(pendingPdf);
+}
+
+function openMailDraft(to){
   const dateText = formatDate(sessionData?.date);
   const names = workers.map(w => `${w.name} (${workerTime(w)})`).join(", ") || "확인자 없음";
   const subject = encodeURIComponent(`TBM 일지 - ${dateText}`);
   const body = encodeURIComponent(
-    `TBM(작업전안전회의) 실시일지\n\n일자: ${dateText}\n인원: ${$("headcount").value || 0}명\n\n[교육내용]\n${summaryForLog()}\n\n[확인자 ${workers.length}명]\n${names}\n\n※ 사진은 인쇄/PDF저장 기능으로 함께 보관해주세요.`
+    `TBM(작업전안전회의) 실시일지\n\n일자: ${dateText}\n인원: ${$("headcount").value || 0}명\n\n[교육내용]\n${summaryForLog()}\n\n[확인자 ${workers.length}명]\n${names}\n\n※ 내려받은 PDF 일지를 첨부해 주세요.`
   );
   window.location.href = `mailto:${to}?subject=${subject}&body=${body}`;
 }
