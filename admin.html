@@ -160,6 +160,13 @@
   .toast.show{opacity:1;}
 
   .mic-btn[disabled]{opacity:0.5;}
+  .rec-choice{display:none;background:var(--sage-tint);border-radius:12px;padding:14px;margin-top:14px;text-align:left;}
+  .rec-choice p{font-size:14.5px;font-weight:700;color:var(--forest-deep);margin:0 0 10px;}
+  .rec-choice .btn-row{margin-bottom:8px;}
+  .kakao-banner{display:none;background:var(--red-tint);border-bottom:2px solid var(--red);padding:16px 20px;color:var(--ink);}
+  .kakao-banner strong{display:block;font-size:16px;margin-bottom:4px;color:var(--red);}
+  .kakao-banner p{font-size:14px;line-height:1.5;margin:0 0 12px;}
+  .kakao-banner .btn-row{margin:0;}
   .session-label{font-size:16px;font-weight:800;color:var(--forest-deep);margin:14px 0;}
   .history-row{
     display:block;width:100%;text-align:left;background:#fff;border:none;border-bottom:1px solid var(--line);
@@ -185,6 +192,15 @@
 </head>
 <body>
 <div id="app">
+
+  <div class="kakao-banner no-print" id="kakaoBanner">
+    <strong>크롬에서 열어 주세요</strong>
+    <p>카카오톡 안에서는 녹음 중 마이크 허용 창이 반복해서 뜰 수 있어요.</p>
+    <div class="btn-row">
+      <button class="btn btn-danger" id="openChromeBtn">크롬으로 열기</button>
+      <button class="btn btn-outline" id="copyAppLinkBtn">주소 복사</button>
+    </div>
+  </div>
 
   <div id="gate">
     <div class="eyebrow" style="color:#B9CBB1;font-size:13px;font-weight:700;">FOREST SAFETY · TBM</div>
@@ -245,6 +261,14 @@
             <button class="mic-btn" id="micBtn">🎤</button>
             <div class="mic-timer" id="micTimer">00:00</div>
             <div class="mic-hint" id="micHint">버튼을 누르면 녹음이 시작돼요</div>
+            <div class="rec-choice" id="recChoice">
+              <p>이미 적힌 교육내용이 있어요. 어떻게 녹음할까요?</p>
+              <div class="btn-row">
+                <button class="btn btn-primary" id="recNewBtn">새로 쓰기</button>
+                <button class="btn btn-ghost" id="recAppendBtn">이어서 쓰기</button>
+              </div>
+              <button class="btn btn-outline" id="recCancelBtn">취소</button>
+            </div>
           </div>
           <div style="margin-top:16px;">
             <div class="transcript-label">교육내용 (자동 정리됨 · 직접 수정 가능)</div>
@@ -335,6 +359,28 @@ function toast(msg){
   clearTimeout(toast._timer);
   toast._timer = setTimeout(()=>t.classList.remove("show"), 2400);
 }
+
+// ---------- 카카오톡 내부 브라우저 안내 ----------
+function setupKakaoBanner(){
+  const ua = navigator.userAgent || "";
+  if (!/KAKAOTALK/i.test(ua)) return;
+  $("kakaoBanner").style.display = "block";
+  const url = location.origin + location.pathname;
+  $("openChromeBtn").onclick = () => {
+    if (/Android/i.test(ua)) {
+      location.href = `intent://${location.host}${location.pathname}#Intent;scheme=https;package=com.android.chrome;end`;
+    } else {
+      location.href = "kakaotalk://web/openExternal?url=" + encodeURIComponent(url);
+    }
+  };
+  $("copyAppLinkBtn").onclick = () => {
+    if (!navigator.clipboard) { toast("주소를 길게 눌러 복사해주세요"); return; }
+    navigator.clipboard.writeText(url)
+      .then(() => toast("주소가 복사됐어요. 크롬 주소창에 붙여 넣어주세요"))
+      .catch(() => toast("복사에 실패했어요. 카카오톡에서 주소를 길게 눌러 복사해주세요"));
+  };
+}
+setupKakaoBanner();
 
 // ---------- gate ----------
 $("gateBtn").onclick = () => {
@@ -520,6 +566,10 @@ function openSession(id){
   $("summaryText").value = "";
   $("micTimer").textContent = "00:00";
   $("micHint").textContent = "버튼을 누르면 녹음이 시작돼요";
+  if ($("recChoice").style.display === "block") {
+    $("recChoice").style.display = "none";
+    $("micBtn").disabled = false;
+  }
   renderPhotos();
   renderWorkers([]);
   $("homeArea").style.display = "none";
@@ -631,6 +681,9 @@ function setupMic(){
   let finalTranscript = "";
   let lastInterim = "";
   let micError = "";
+  let recordMode = "new";
+  let summaryBeforeRecording = "";
+  let dirtyBeforeRecording = false;
   let timerInterval = null;
   let finishTimer = null;
   let seconds = 0;
@@ -708,28 +761,48 @@ function setupMic(){
     }
   };
 
-  micBtn.onclick = () => {
-    if (!recording) {
-      finalTranscript = "";
-      lastInterim = "";
-      micError = "";
-      seconds = 0;
-      recording = true;
-      micBusy = true;
-      micBtn.classList.add("recording");
-      $("micTimer").textContent = "00:00";
-      $("micHint").textContent = "듣고 있어요...";
-      try { recognition.start(); } catch(e){}
-      timerInterval = setInterval(() => {
-        seconds++;
-        const m = String(Math.floor(seconds/60)).padStart(2,"0");
-        const s = String(seconds%60).padStart(2,"0");
-        $("micTimer").textContent = `${m}:${s}`;
-        if (seconds >= 300) stopRecording();
-      }, 1000);
-    } else {
-      stopRecording();
+  function showRecChoice(show){
+    $("recChoice").style.display = show ? "block" : "none";
+    micBtn.disabled = show;
+  }
+
+  function startRecording(mode){
+    showRecChoice(false);
+    recordMode = mode;
+    summaryBeforeRecording = $("summaryText").value;
+    dirtyBeforeRecording = summaryDirty;
+    if (mode === "new") {
+      // 녹음 중에는 칸을 비워 두고, 인식된 말이 없으면 원래 내용으로 되돌려요.
+      $("summaryText").value = "";
+      summaryDirty = true;
     }
+    finalTranscript = "";
+    lastInterim = "";
+    micError = "";
+    seconds = 0;
+    recording = true;
+    micBusy = true;
+    micBtn.classList.add("recording");
+    $("micTimer").textContent = "00:00";
+    $("micHint").textContent = "듣고 있어요...";
+    try { recognition.start(); } catch(e){}
+    timerInterval = setInterval(() => {
+      seconds++;
+      const m = String(Math.floor(seconds/60)).padStart(2,"0");
+      const s = String(seconds%60).padStart(2,"0");
+      $("micTimer").textContent = `${m}:${s}`;
+      if (seconds >= 300) stopRecording();
+    }, 1000);
+  }
+
+  $("recNewBtn").onclick = () => startRecording("new");
+  $("recAppendBtn").onclick = () => startRecording("append");
+  $("recCancelBtn").onclick = () => showRecChoice(false);
+
+  micBtn.onclick = () => {
+    if (recording) { stopRecording(); return; }
+    if ($("summaryText").value.trim()) showRecChoice(true);
+    else startRecording("new");
   };
 
   // 정지 후에 도착하는 마지막 인식 결과까지 받은 뒤 정리해요.
@@ -755,16 +828,20 @@ function setupMic(){
 
     const cleaned = cleanUpTranscript(finalTranscript);
     if (!cleaned) {
+      if (recordMode === "new") {
+        $("summaryText").value = summaryBeforeRecording;
+        summaryDirty = dirtyBeforeRecording;
+      }
       $("micHint").textContent = micError || "인식된 내용이 없어요. 다시 녹음하거나 직접 입력해주세요.";
       return;
     }
-    // 다시 녹음해도 앞서 적어둔 내용을 지우지 않고 뒤에 이어붙여요.
     const existing = $("summaryText").value.trim();
-    $("summaryText").value = existing ? existing + "\n" + cleaned : cleaned;
+    $("summaryText").value = recordMode === "append" && existing ? existing + "\n" + cleaned : cleaned;
     summaryDirty = true;
     $("micHint").textContent = micError || "녹음이 끝났어요. 아래 내용을 확인하고 저장해주세요.";
     const prevRaw = sessionData?.rawTranscript;
-    saveSummary({ silent: true, extra: { rawTranscript: prevRaw ? prevRaw + "\n" + finalTranscript : finalTranscript } });
+    const raw = recordMode === "append" && prevRaw ? prevRaw + "\n" + finalTranscript : finalTranscript;
+    saveSummary({ silent: true, extra: { rawTranscript: raw } });
   }
 }
 
