@@ -181,14 +181,27 @@
   details.card .desc{margin-top:10px;}
 
   /* 일지는 인쇄할 때만 나타나요 */
-  #printSheet{display:none;}
+  /* 화면 밖에 그려 두어 사진이 인쇄 전에 미리 준비되게 해요 */
+  #printSheet{position:absolute;left:-10000px;top:0;width:800px;border:none;}
+  .log-title{font-size:22px;font-weight:900;text-align:center;margin:0 0 14px;color:#000;}
+  .log-section{font-size:14px;font-weight:700;margin:16px 0 6px;color:#000;}
+  .log-table{width:100%;border-collapse:collapse;table-layout:fixed;font-size:12.5px;color:#000;border:1.5px solid #000;}
+  .log-table th,.log-table td{border:1px solid #000;padding:7px 8px;vertical-align:middle;word-break:break-word;}
+  .log-table th{background:#E9E9E9;font-weight:700;text-align:center;-webkit-print-color-adjust:exact;print-color-adjust:exact;}
+  .log-summary{white-space:pre-wrap;line-height:1.7;vertical-align:top !important;min-height:120px;height:120px;}
+  .log-sign td{height:32px;text-align:center;}
+  .log-sign tr,.log-photos tr{break-inside:avoid;page-break-inside:avoid;}
+  .log-photos td{width:50%;height:210px;padding:4px;text-align:center;}
+  .log-photos img{display:block;width:100%;height:200px;object-fit:contain;}
+  .log-photos .log-empty{height:44px;color:#444;}
   @media print{
-    header,.no-print,.toast,#gate{display:none !important;}
-    html,body,#app{background:#fff;}
+    @page{size:A4;margin:12mm;}
+    header,.no-print,.toast,#gate,#kakaoBanner{display:none !important;}
+    html,body,#app,#main{background:#fff;min-height:0 !important;height:auto !important;}
+    body{padding:0;}
     main{padding:0;}
     #main .card:not(#printSheet){display:none !important;}
-    #printSheet{display:block !important;border:none;padding:0;margin:0;}
-    #p_photos .photo-thumb{break-inside:avoid;}
+    #printSheet{position:static;width:auto;display:block !important;border:none;border-radius:0;padding:0;margin:0;}
   }
 </style>
 </head>
@@ -254,6 +267,8 @@
           <p class="desc">현장에 나온 인원수를 입력하면 근로자 확인 현황이 정확해져요.</p>
           <label for="headcount">오늘 인원수</label>
           <input type="number" id="headcount" min="1" placeholder="예: 8" inputmode="numeric">
+          <label for="leaderName" style="margin-top:14px;">TBM 실시자 이름</label>
+          <input type="text" id="leaderName" maxlength="20" placeholder="일지에 표시할 이름">
         </div>
 
         <div class="card">
@@ -319,14 +334,24 @@
         </div>
 
         <div class="card" id="printSheet">
-          <h2 style="font-size:20px;">TBM(작업전안전회의) 실시일지</h2>
-          <p><b>일자:</b> <span id="p_date"></span> &nbsp; <b>실시자:</b> 관리자 &nbsp; <b>인원:</b> <span id="p_headcount"></span>명</p>
-          <p><b>교육내용</b></p>
-          <p id="p_summary" style="white-space:pre-wrap;line-height:1.7;"></p>
-          <p><b>확인 서명자</b></p>
-          <div id="p_workers"></div>
-          <p><b>현장 사진</b></p>
-          <div class="photo-grid" id="p_photos" style="grid-template-columns:repeat(3,1fr);"></div>
+          <h1 class="log-title">작업 전 안전점검회의(TBM) 일지</h1>
+          <table class="log-table">
+            <colgroup><col style="width:18%"><col style="width:42%"><col style="width:18%"><col style="width:22%"></colgroup>
+            <tr><th>일시</th><td id="p_date"></td><th>참석 인원</th><td><span id="p_headcount"></span>명</td></tr>
+            <tr><th>TBM 실시자</th><td colspan="3" id="p_leader"></td></tr>
+            <tr><th>교육내용</th><td colspan="3" id="p_summary" class="log-summary"></td></tr>
+            <tr><th>확인 사항</th><td colspan="3">근로자는 위 교육내용과 벌목작업 재해예방 5대 안전수칙을 확인하였음</td></tr>
+          </table>
+
+          <h2 class="log-section">참석자 확인</h2>
+          <table class="log-table log-sign">
+            <colgroup><col style="width:10%"><col style="width:30%"><col style="width:25%"><col style="width:35%"></colgroup>
+            <thead><tr><th>번호</th><th>이름</th><th>확인 시간</th><th>서명</th></tr></thead>
+            <tbody id="p_workers"></tbody>
+          </table>
+
+          <h2 class="log-section">현장 사진</h2>
+          <table class="log-table log-photos"><tbody id="p_photos"></tbody></table>
         </div>
 
       </div>
@@ -438,6 +463,7 @@ let workers = []; // {name, completedAt} 이름 중복 제거 후
 let headcountNow = 0;
 let summaryDirty = false; // 저장되지 않은 교육내용 수정이 있는지
 let micBusy = false;      // 녹음 중이거나 녹음 내용을 정리하는 중인지
+let printPrepared = false; // 인쇄 버튼으로 일지와 사진을 이미 준비했는지
 
 function todayStr(){
   const d = new Date();
@@ -458,6 +484,7 @@ function init(){
   $("summaryText").oninput = () => { summaryDirty = true; };
   $("summaryText").onchange = () => { if (summaryDirty) saveSummary({ silent: true }); };
   $("headcount").onchange = saveHeadcount;
+  $("leaderName").onchange = saveLeader;
   $("photoAddBtn").onclick = () => { setPhotoPending(true); $("photoInput").click(); };
   $("photoGalleryBtn").onclick = () => $("photoGalleryInput").click();
   $("photoInput").onchange = handlePhotoSelect;
@@ -467,7 +494,8 @@ function init(){
   $("copyLinkBtn").onclick = copyLink;
   $("printBtn").onclick = printLog;
   $("emailBtn").onclick = emailLog;
-  window.addEventListener("beforeprint", buildPrintSheet);
+  window.addEventListener("beforeprint", () => { if (!printPrepared) buildPrintSheet(); });
+  window.addEventListener("afterprint", () => { printPrepared = false; });
   setupMic();
 
   // 오늘 이미 시작한 세션이 있으면 이어서
@@ -604,6 +632,7 @@ function openSession(id){
   headcountNow = 0;
   summaryDirty = false;
   $("headcount").value = "";
+  $("leaderName").value = savedLeaderName();
   $("summaryText").value = "";
   $("micTimer").textContent = "00:00";
   $("micHint").textContent = "버튼을 누르면 녹음이 시작돼요";
@@ -631,6 +660,7 @@ function attachSession(){
     $("sessionLabel").textContent = `${formatDate(d.date)} TBM${isPast ? " (지난 일지)" : ""}`;
     $("linkCard").style.display = isPast ? "none" : "block";
     if (document.activeElement !== $("headcount")) $("headcount").value = d.headcount || "";
+    if (d.leader && document.activeElement !== $("leaderName")) $("leaderName").value = d.leader;
     // 아직 저장하지 않은 수정 내용은 서버 값으로 덮어쓰지 않아요.
     if (!summaryDirty && document.activeElement !== $("summaryText")) $("summaryText").value = d.summary || "";
     updateProgressUI(d.headcount || 0);
@@ -655,6 +685,23 @@ async function saveHeadcount(){
   } catch (err) {
     console.error(err);
     toast("인원수를 저장하지 못했어요");
+  }
+}
+
+// 실시자 이름은 이 휴대폰에 기억해 두고 다음 일지에도 미리 채워요.
+function savedLeaderName(){
+  try { return localStorage.getItem("tbm_leader_name") || ""; }
+  catch (e) { return ""; }
+}
+
+async function saveLeader(){
+  const name = $("leaderName").value.trim();
+  try { localStorage.setItem("tbm_leader_name", name); } catch (e) {}
+  try {
+    await updateDoc(doc(db, "sessions", sessionId), { leader: name });
+  } catch (err) {
+    console.error(err);
+    toast("실시자 이름을 저장하지 못했어요");
   }
 }
 
@@ -1032,37 +1079,58 @@ function buildPrintSheet(){
   if (!sessionId) return;
   $("p_date").textContent = formatDate(sessionData?.date);
   $("p_headcount").textContent = $("headcount").value || "0";
+  $("p_leader").textContent = $("leaderName").value.trim();
   $("p_summary").textContent = $("summaryText").value || "(작성된 교육내용 없음)";
 
+  // 확인자보다 인원이 많으면 남은 칸은 비워 둬서 손으로 적을 수 있게 해요.
   const wrap = $("p_workers");
   wrap.innerHTML = "";
-  if (workers.length === 0) wrap.textContent = "확인자 없음";
-  workers.forEach((w, i) => {
-    const row = document.createElement("div");
-    row.className = "worker-row";
-    const name = document.createElement("span");
-    name.textContent = `${i + 1}. ${w.name}`;
-    const time = document.createElement("span");
-    time.textContent = `${workerTime(w)} 확인`;
-    row.append(name, time);
+  const rowCount = Math.max(workers.length, parseInt($("headcount").value || "0", 10) || 0, 1);
+  for (let i = 0; i < rowCount; i++) {
+    const w = workers[i];
+    const row = document.createElement("tr");
+    [String(i + 1), w ? w.name : "", w ? workerTime(w) : "", ""].forEach((text) => {
+      const cell = document.createElement("td");
+      cell.textContent = text;
+      row.appendChild(cell);
+    });
     wrap.appendChild(row);
-  });
+  }
 
   const pgrid = $("p_photos");
   pgrid.innerHTML = "";
-  photos.forEach((p) => {
-    const div = document.createElement("div");
-    div.className = "photo-thumb";
-    div.appendChild(makePhotoImg(p));
-    pgrid.appendChild(div);
-  });
+  if (photos.length === 0) {
+    const row = document.createElement("tr");
+    const cell = document.createElement("td");
+    cell.className = "log-empty";
+    cell.textContent = "첨부한 사진 없음";
+    row.appendChild(cell);
+    pgrid.appendChild(row);
+  }
+  for (let i = 0; i < photos.length; i += 2) {
+    const row = document.createElement("tr");
+    [photos[i], photos[i + 1]].forEach((p) => {
+      const cell = document.createElement("td");
+      if (p) cell.appendChild(makePhotoImg(p));
+      row.appendChild(cell);
+    });
+    pgrid.appendChild(row);
+  }
 }
 
 async function printLog(){
   buildPrintSheet();
   // 사진이 그려지기 전에 인쇄되어 빈칸이 나오지 않게 기다려요.
   const imgs = Array.from($("p_photos").querySelectorAll("img"));
-  await Promise.all(imgs.map(img => img.decode ? img.decode().catch(()=>{}) : null));
+  // 사진 준비가 늦어져도 인쇄 버튼이 멈추지 않게 3초까지만 기다려요.
+  const ready = Promise.all(imgs.map(img => img.complete ? null : new Promise((resolve) => {
+    img.onload = resolve;
+    img.onerror = resolve;
+  })));
+  await Promise.race([ready, new Promise(resolve => setTimeout(resolve, 3000))]);
+  await new Promise(resolve => setTimeout(resolve, 300));
+  // 준비한 사진이 인쇄 직전에 다시 만들어지지 않게 표시해 둬요.
+  printPrepared = true;
   window.print();
 }
 
