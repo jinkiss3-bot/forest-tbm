@@ -160,6 +160,8 @@
   .toast.show{opacity:1;}
 
   .mic-btn[disabled]{opacity:0.5;}
+  .photo-add{flex-direction:column;gap:4px;text-align:center;}
+  .photo-add span{font-size:12px;font-weight:700;color:var(--ink);}
   .rec-choice{display:none;background:var(--sage-tint);border-radius:12px;padding:14px;margin-top:14px;text-align:left;}
   .rec-choice p{font-size:14.5px;font-weight:700;color:var(--forest-deep);margin:0 0 10px;}
   .rec-choice .btn-row{margin-bottom:8px;}
@@ -280,10 +282,13 @@
         <div class="card">
           <h2>현장 사진</h2>
           <p class="desc">사진 버튼을 눌러 촬영하면 일지에 자동으로 첨부돼요. 개수 제한 없어요.</p>
+          <p class="desc" id="photoNote" style="display:none;color:var(--red);font-weight:700;">카메라에서 돌아오면서 화면이 새로 열렸어요. 사진이 아래에 없으면 휴대폰 카메라 앱으로 찍은 뒤 앨범에서 선택해 주세요.</p>
           <div class="photo-grid" id="photoGrid">
-            <div class="photo-add" id="photoAddBtn">📷</div>
+            <div class="photo-add" id="photoAddBtn">📷<span>사진 찍기</span></div>
+            <div class="photo-add" id="photoGalleryBtn">🖼️<span>앨범에서 선택</span></div>
           </div>
-          <input type="file" id="photoInput" accept="image/*" capture="environment" multiple style="display:none;">
+          <input type="file" id="photoInput" accept="image/*" capture="environment" style="display:none;">
+          <input type="file" id="photoGalleryInput" accept="image/*" multiple style="display:none;">
         </div>
 
         <div class="card" id="linkCard">
@@ -383,11 +388,43 @@ function setupKakaoBanner(){
 setupKakaoBanner();
 
 // ---------- gate ----------
+// 카메라에서 돌아올 때 화면이 새로 열려도 비밀번호를 다시 묻지 않아요. (12시간 유지)
+const ADMIN_UNTIL_KEY = "tbm_admin_until";
+const ADMIN_KEEP_MS = 12 * 60 * 60 * 1000;
+const PHOTO_PENDING_KEY = "tbm_photo_pending";
+const PHOTO_PENDING_MS = 10 * 60 * 1000;
+
+function enterAdmin(){
+  $("gate").style.display = "none";
+  $("main").style.display = "block";
+  init();
+}
+
+function adminRemembered(){
+  try { return Number(localStorage.getItem(ADMIN_UNTIL_KEY)) > Date.now(); }
+  catch (e) { return false; }
+}
+
+function setPhotoPending(on){
+  try {
+    if (on) localStorage.setItem(PHOTO_PENDING_KEY, String(Date.now()));
+    else localStorage.removeItem(PHOTO_PENDING_KEY);
+  } catch (e) {}
+}
+
+// 카메라를 켠 채로 화면이 새로 열렸다면 찍은 사진을 받지 못했을 수 있어요.
+function checkPhotoPending(){
+  try {
+    const at = Number(localStorage.getItem(PHOTO_PENDING_KEY));
+    if (at && Date.now() - at < PHOTO_PENDING_MS) $("photoNote").style.display = "block";
+  } catch (e) {}
+  setPhotoPending(false);
+}
+
 $("gateBtn").onclick = () => {
   if ($("gatePass").value.trim() === ADMIN_PASSCODE) {
-    $("gate").style.display = "none";
-    $("main").style.display = "block";
-    init();
+    try { localStorage.setItem(ADMIN_UNTIL_KEY, String(Date.now() + ADMIN_KEEP_MS)); } catch (e) {}
+    enterAdmin();
   } else {
     $("gateErr").style.display = "block";
   }
@@ -421,8 +458,12 @@ function init(){
   $("summaryText").oninput = () => { summaryDirty = true; };
   $("summaryText").onchange = () => { if (summaryDirty) saveSummary({ silent: true }); };
   $("headcount").onchange = saveHeadcount;
-  $("photoAddBtn").onclick = () => $("photoInput").click();
+  $("photoAddBtn").onclick = () => { setPhotoPending(true); $("photoInput").click(); };
+  $("photoGalleryBtn").onclick = () => $("photoGalleryInput").click();
   $("photoInput").onchange = handlePhotoSelect;
+  $("photoGalleryInput").onchange = handlePhotoSelect;
+  $("photoInput").addEventListener("cancel", () => setPhotoPending(false));
+  checkPhotoPending();
   $("copyLinkBtn").onclick = copyLink;
   $("printBtn").onclick = printLog;
   $("emailBtn").onclick = emailLog;
@@ -925,7 +966,9 @@ function resizeImage(file, maxW=800, quality=0.6){
 async function handlePhotoSelect(e){
   const files = Array.from(e.target.files || []);
   e.target.value = "";
+  setPhotoPending(false);
   if (files.length === 0) return;
+  $("photoNote").style.display = "none";
   let failed = 0;
   for (const file of files) {
     try {
@@ -1036,6 +1079,9 @@ function emailLog(){
 function escapeHtml(s){
   return String(s||"").replace(/[&<>"']/g, m => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[m]));
 }
+
+// 모든 함수와 변수가 준비된 뒤에 이전 로그인을 이어 가요.
+if (adminRemembered()) enterAdmin();
 </script>
 </body>
 </html>
